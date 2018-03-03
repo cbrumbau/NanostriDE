@@ -1,2 +1,2 @@
 # nanostride
-Files to run the website for the NanostriDE website
+Files to run the NanostriDE website tool
