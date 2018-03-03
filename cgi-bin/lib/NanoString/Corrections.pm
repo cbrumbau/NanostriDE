@@ -93,7 +93,7 @@ sub format_localtime {
 =head1 SYNOPSIS
 
 	use NanoString::Corrections;
-	my $corrected_data_ref = NanoString::Corrections->applyCorrections ($raw_data_array_ref, $type_of_correction, $actual_fov);
+	my $corrected_data_ref = NanoString::Corrections->applyCorrections ($raw_data_array_ref, $correction_hash_ref, $type_of_correction, $actual_fov);
 
 =head1 DESCRIPTION
 
@@ -103,7 +103,7 @@ This is a library which applies corrections to NanoString raw data.
 
 =head3 new
 
-	NanoString::Corrections->applyCorrections ($raw_data_array_ref, $type_of_correction, $actual_fov);
+	NanoString::Corrections->applyCorrections ($raw_data_array_ref, $correction_hash_ref, $type_of_correction, $actual_fov);
 
 Takes a reference to a raw data array from an RCC object (use getRawData())
 and the type of correction to apply. Returns a reference to an array that
@@ -116,6 +116,8 @@ sub applyCorrections {
 	my $package = shift;
 	my $raw_data_array_ref = shift;
 	my @raw_data_array = @{$raw_data_array_ref};
+	my $corrections_hash_ref = shift;
+	my %corrections_hash = %{$corrections_hash_ref};
 	my $type_of_correction = shift;
 	my $actual_fov = shift;
 	my %gene_to_index = ();
@@ -140,7 +142,22 @@ sub applyCorrections {
 						print STDERR format_localtime()."DEBUG: Count of 128fM is $POS_128fM\n";
 					}
 				}
-				if ($row[$gene_to_index{"Name"}] =~ m/.+\(\+\+\+\s+See\s+Message\s+Below\)/) {
+				if (scalar (keys (%corrections_hash)) > 0) {
+					# New format
+					my $name = $row[$gene_to_index{"Name"}];
+					if (exists $corrections_hash{$name}) {
+						my $count = $raw_data_array[$i][$gene_to_index{"Count"}]-($POS_128fM*$corrections_hash{$name});
+						if ($debug > 0) {
+							print STDERR format_localtime()."DEBUG: Corrected value for $name is ".$raw_data_array[$i][$gene_to_index{"Count"}]." - ($POS_128fM * ".$corrections_hash{$name}." = $count\n";
+						}
+						if ($count > 0) {
+							$corrected_data_array[$i][$gene_to_index{"Count"}] = $count;
+						} else {
+							$corrected_data_array[$i][$gene_to_index{"Count"}] = 0;
+						}
+					}
+				} elsif ($row[$gene_to_index{"Name"}] =~ m/.+\(\+\+\+\s+See\s+Message\s+Below\)/) {
+					# Old format
 					my $name = $row[$gene_to_index{"Name"}];
 					$name =~ s/\s*\(\+\+\+\s+See\s+Message\s+Below\)//g;
 					$name =~ s/\s+//g; # strip whitespaces
@@ -157,7 +174,22 @@ sub applyCorrections {
 					}
 				}
 			} elsif ($type_of_correction eq "mouse") {
-				if ($row[$gene_to_index{"Name"}] =~ m/.+\(\+\+\+\s+See\s+Message\s+Below\)/) {
+				if (scalar (keys (%corrections_hash)) > 0) {
+					# New format
+					my $name = $row[$gene_to_index{"Name"}];
+					if (exists $corrections_hash{$name}) {
+						my $count = $raw_data_array[$i][$gene_to_index{"Count"}]-$corrections_hash{$name}*($actual_fov/600);
+						if ($debug > 0) {
+							print STDERR format_localtime()."DEBUG: Corrected value for $name is ".$raw_data_array[$i][$gene_to_index{"Count"}]." - ".$corrections_hash{$name}." * ($actual_fov / 600) = $count\n";
+						}
+						if ($count > 0) {
+							$corrected_data_array[$i][$gene_to_index{"Count"}] = $count;
+						} else {
+							$corrected_data_array[$i][$gene_to_index{"Count"}] = 0;
+						}
+					}
+				} elsif ($row[$gene_to_index{"Name"}] =~ m/.+\(\+\+\+\s+See\s+Message\s+Below\)/) {
+					# Old format
 					my $name = $row[$gene_to_index{"Name"}];
 					$name =~ s/\s*\(\+\+\+\s+See\s+Message\s+Below\)//g;
 					$name =~ s/\s+//g; # strip whitespaces

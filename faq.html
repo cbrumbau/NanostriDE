@@ -36,8 +36,8 @@
 	</div>
 
 	<div class="navigation">
-		<a href="/contact.html">Contact Us</a>
 		<a href="/about.html">About</a>
+		<a href="/license.html">License</a>
 		<a href="/faq.html">FAQ</a>
 		<a href="/">Upload Data</a>
 		<div class="clearer"><span></span></div>
@@ -47,6 +47,19 @@
 
 	<div class="holder">
 		<h1>FAQ</h1>
+		<p><ol><li>How do I use the NanoStriDE website?</li><br/>
+		The user's guide is available <a href="/docs/NanoStriDE_Users_Guide.pdf">here</a>.<br/>
+		<br/><li>Where can I get sample data?</li><br/>
+		There is <a href="http://www.ncbi.nlm.nih.gov/projects/geo/query/acc.cgi?acc=GSE26970">publicly available data from Nanostring's initial publication</a> hosted by the NCBI. You will have to decompress the raw data files before they can be used with NanoStriDE. In this dataset, there are a series of samples that can be compared. For a pairwise comparison, try comparing differentiated (GSM659276-GSM659280)  versus undifferentiated (GSM659291-GSM659294) canonical cells. You can also test more than 2 sample types using ANOVA or DESeq's implementation of ANODEV.<br/>
+		<br/><li>What is the difference between DESeq and a t-test?</li><br/>
+		Both t-test and DESeq offer statistical methods to test whether two genes/miRNA are differentially expressed between two samples. The major differences between these two methods are the underlying distributions used to describe the data and the method of estimating variance. T-tests assume the data is distributed normally, whereas, DESeq assumes data is distributed negative bionomially. The sampling of mRNA/miRNA is a discrete process and is better described by the negative binomial distribution. Another major difference is in variance estimation. DESeq uses higher estimates of variance than t-tests when expression levels are low. This reduces the total number of false positives called by the method when compared to a t-test. Because of these reasons, we recommend the use of DESeq for differential expression analysis.<br/>
+		<br/><li>What is positive correction?</li><br/>
+		Every NanoString experiment includes spike-in control sequences with a known abundance. These spike-in controls are used to adjust for variation introduced by variance in pipetting and sample preparation. Using simple metrics, the raw counts are adjusted to yield an accurate absolute measurement of transcripts present in a sample. Because only relative abundances are used in DESeq, this step is not performed before feeding the data into the analysis tool when selecting DESeq or one way ANOVA (negative binomial).<br/>
+		<br/><li>What is negative correction?</li><br/>
+		NanoString utilizes a hybridization to tag sequences prior to quantification. As such, there is a small amount of background hybridization present for each probe. To quantitate the amount of background present across all probes, negative control probes are used in each experiment. The average value of the negative probes are subtracted from the positively-corrected data. This reduces the background observed and further improves the absolute measurement of transcripts present in a sample. As is with the positive correction, this step is not performed before feeding the data into the analysis tool when selecting DESeq or one way ANOVA (negative binomial).<br/>
+		<br/><li>What is sample content normalization and why can't I select any with DESeq/one way ANOVA (negative binomial)?</li><br/>
+		Differential analysis requires that the number of quantified transcripts are similar across all samples. Sample content normalization ensures that transcript quantity levels are comparable across samples by normalizing counts to the total number of transcripts seen. DESeq performs its own normalization and positive corrections, negative corrections, and sample content normalization is not required.<br/>
+		</ol></p>
 	</div>
 
 	<div class="holder_bottom"></div>
@@ -55,7 +68,7 @@
 
 	<div class="holder">
 
-		<div class="footer">&copy; 2011 <a href="mailto:nanostring@achilles.soe.ucsc.edu">Chris Brumbaugh</a>. Valid <a href="http://jigsaw.w3.org/css-validator/check/referer">CSS</a> &amp; <a href="http://validator.w3.org/check?uri=referer">XHTML</a>. Template design by <a href="http://arcsin.se">Arcsin</a>
+		<div class="footer">&copy; 2011 <a href="mailto:admin@nanostride.soe.ucsc.edu">Chris Brumbaugh</a>. Valid <a href="http://jigsaw.w3.org/css-validator/check/referer">CSS</a> &amp; <a href="http://validator.w3.org/check?uri=referer">XHTML</a>. Template design by <a href="http://arcsin.se">Arcsin</a>
 		</div>
 
 	</div>

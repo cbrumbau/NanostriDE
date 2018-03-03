@@ -27,7 +27,13 @@ body {
 	margin: 0;
 }
 
-p,cite,code,ul {
+p,ol {
+	font-size: 1.25em;
+	padding-left: 1.2em;
+	padding-bottom: 1.2em;
+}
+
+cite,code,ul {
 	font-size: 1.2em;
 	padding-bottom: 1.2em;
 }

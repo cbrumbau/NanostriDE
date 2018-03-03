@@ -7,8 +7,6 @@
 # in order to process the data and generate a differential expression heatmap
 # for the provided data and given conditions.
 # 
-# Use Statistics::R module to use R instead of using R scripts.
-# 
 # Generates a PNG of the heatmap given the raw data files.
 # 
 # Chris Brumbaugh, cbrumbau@soe.ucsc.edu, 02/09/2011
@@ -23,7 +21,6 @@ use warnings;
 use strict;
 use Getopt::Long;
 use File::Path qw(make_path);
-use Statistics::R;
 use Unix::PID;
 use NanoString::RCC; # local module
 use NanoString::Corrections; # local module
@@ -58,14 +55,14 @@ my $heatmap_colors = 'colorRampPalette(c("green", "black", "red"))(100)';
 my $R_data_output = '';
 my $R_norm_output = '';
 my $tabdelimited_output;
-my $install_Rpackages; # can't catch errors for missing target packages in Bioconductor, safer to install manually in R instance?
 my $R_packages_dir = '';
-my $R_log_dir_base = "/tmp/Statistics-R/";
-my $R_log_dir = '';
 my $warnings = 1;
 my $warnings_file = 'warnings.txt';
 our $debug = 0;
 our $debug_verbosity = 3;
+my @time_data = localtime(time);
+$time_data[5] += 1900;
+my $tmp_R_dir = "/tmp/NanoStriDE/".join("-", @time_data)."_".int(rand(4096))."/";
 my $args = GetOptions ("inputfile|f=s"			=> \@rawdata_files,
 						"inputdir|d=s"			=> \$rawdata_dir,
 						"labels|l=s"			=> \@rawdata_labels,
@@ -91,9 +88,7 @@ my $args = GetOptions ("inputfile|f=s"			=> \@rawdata_files,
 						"Rdataoutput=s"			=> \$R_data_output,
 						"Rnormoutput=s"			=> \$R_norm_output,
 						"taboutput"				=> \$tabdelimited_output,
-						"installRpack"			=> \$install_Rpackages,
 						"Rpackdir=s"			=> \$R_packages_dir,
-						"Rlogdir=s"				=> \$R_log_dir,
 						"warnings=i"			=> \$warnings,
 						"warningsfile=s"		=> \$warnings_file,
 						"debug=i"				=> \$debug,
@@ -210,37 +205,11 @@ sub format_localtime {
 	return "[".$the_time."] ";
 }
 
-# Install R packages if requested and exit
-if ($install_Rpackages) {
-	my $R = Statistics::R->new ();
-	$R->startR ();
-	# Get DESeq for negative binomial normalization
-	$R->send ('source("http://www.bioconductor.org/biocLite.R");');
-	$R->send ('biocLite("DESeq");');
-	# Get gplots for heatmap plotting
-	$R->send ('install.packages("gplots");');
-	# Stop R and exit
-	$R->stopR ();
-	exit (0);
-}
-
 # Set debug flag in modules
 NanoString::RCC->setDebug ($debug);
 NanoString::RCC->setDebugVerbosity ($debug_verbosity);
 NanoString::Corrections->setDebug ($debug);
 NanoString::Corrections->setDebugVerbosity ($debug_verbosity);
-
-# Set R log dir if not provided
-if ($R_log_dir eq '') {
-	my @time_data = localtime(time);
-	$time_data[5] += 1900;
-	my $join_time = join ('-', @time_data);
-	$R_log_dir = $join_time."_".int(rand(4096));
-}
-
-# Create dirs for R log if necessary
-# Otherwise Statistics::R hangs
-make_path ($R_log_dir_base);
 
 # Prepare datatype, either mRNA or miRNA
 if (! (grep {$_ eq $data_type} ("mRNA", "miRNA"))) {
@@ -307,9 +276,8 @@ if ($warnings) {
 	}
 	open (WRITEFILE, ">:utf8", $warnings_file);
 		#~ or die format_localtime()."ERROR: Please enter a valid filepath ($warnings_file), stopped";
-	print WRITEFILE "# Check for warnings\n";
-	print WRITEFILE "# 1. FOVCounted to FOVCount ratio; flag if less than 80%\n";
-	print WRITEFILE "# 2. Binding density - should be between 0.05 and 2.25; flag if not\n";
+	# 1. FOVCounted to FOVCount ratio; flag if less than 80%
+	# 2. Binding density - should be between 0.05 and 2.25; flag if not
 	foreach my $path (@rawdata_files) {
 		my $RCC = NanoString::RCC->new ($path);
 		my $file = $path;
@@ -336,12 +304,14 @@ if ($warnings) {
 my @all_RCC = ();
 foreach my $path (@rawdata_files) {
 	push (@all_RCC, NanoString::RCC->new ($path));
-	if ($data_type eq "miRNA") {
-		my $corrected_data_ref = NanoString::Corrections->applyCorrections (\@{$all_RCC[-1]->getRawData ()}, $correction_type, $all_RCC[-1]->getValue ("Lane Attributes", "FovCounted"));
-		my $temp_RCC = pop(@all_RCC);
-		$temp_RCC = $temp_RCC->setRawData ($corrected_data_ref);
-		push(@all_RCC, $temp_RCC);
-	}
+	#~ my $corrections_ref = $all_RCC[-1]->getCorrections ();
+	$all_RCC[-1] = $all_RCC[-1]->stripCorrections ();
+	#~ if ($data_type eq "miRNA") {
+		#~ my $corrected_data_ref = NanoString::Corrections->applyCorrections (\@{$all_RCC[-1]->getRawData ()}, $corrections_ref, $correction_type, $all_RCC[-1]->getValue ("Lane Attributes", "FovCounted"));
+		#~ my $temp_RCC = pop(@all_RCC);
+		#~ $temp_RCC = $temp_RCC->setRawData ($corrected_data_ref);
+		#~ push(@all_RCC, $temp_RCC);
+	#~ }
 }
 if ($debug > 0) {
 	print STDERR format_localtime()."DEBUG: Number of files read in: ".scalar (@all_RCC)."\n";
@@ -420,19 +390,23 @@ if (length ($R_norm_output) > 0) {
 }
 
 # Start R
-if ($debug > 0) {
-	print STDERR format_localtime()."DEBUG: Starting R...\n";
-	print STDERR format_localtime()."DEBUG: Setting R log dir to ".$R_log_dir_base.$R_log_dir."...\n";
-}
-mkdir ($R_log_dir_base.$R_log_dir, 0777);
-my $R = Statistics::R->new ('log_dir' => $R_log_dir_base.$R_log_dir);
-$R->startR ();
-$R->lock ();
+#~ if ($debug > 0) {
+	#~ print STDERR format_localtime()."DEBUG: Starting R...\n";
+	#~ print STDERR format_localtime()."DEBUG: Setting R log dir to ".$R_log_dir_base.$R_log_dir."...\n";
+#~ }
+#~ mkdir ($R_log_dir_base.$R_log_dir, 0777);
+#~ my $R = Statistics::R->new ('log_dir' => $R_log_dir_base.$R_log_dir);
+#~ $R->startR ();
+#~ $R->lock ();
 if ($debug > 0) {
 	print STDERR format_localtime()."DEBUG: Sending variables to R...\n";
 }
-$R->send ($R_command);
-$R->send ($R_normalize);
+#~ print RSCRIPT $R_command);
+#~ print RSCRIPT $R_normalize);
+make_path ($tmp_R_dir);
+open (RSCRIPT, ">", $tmp_R_dir.'generate_heatmap.R');
+print RSCRIPT $R_command.''."\n";
+print RSCRIPT $R_normalize.''."\n";
 undef $R_command; # free up memory, sent to R
 undef $R_normalize; # free up memory, sent to R
 my $timeout = 20;
@@ -443,7 +417,7 @@ if ($R_packages_dir !~ m/^\s*$/) {
 	if ($debug > 0) {
 		print STDERR format_localtime()."DEBUG: Adding ".$R_packages_dir." to the R library paths...\n";
 	}
-	$R->send ('.libPaths(c("'.$R_packages_dir.'", .libPaths()))');
+	print RSCRIPT '.libPaths(c("'.$R_packages_dir.'", .libPaths()))'."\n";
 }
 
 # Store file names in vector if warnings
@@ -451,27 +425,70 @@ if ($warnings) {
 	if ($debug > 0) {
 		print STDERR format_localtime()."DEBUG: Storing (".join (', ', @rawdata_names).") file names for warnings ...\n";
 	}
-	$R->send ('file_names <- c('.join (', ', @rawdata_names).')');
+	print RSCRIPT 'file_names <- c('.join (', ', @rawdata_names).')'."\n";
 }
 
-# Output corrected data to file
+# Output corrected or raw data to file
+#~ if ($data_type eq "miRNA") {
+	#~ if ($tabdelimited_output) {
+		#~ if ($debug > 0) {
+			#~ print STDERR format_localtime()."DEBUG: Writing corrected data to tab delimited file...\n";
+		#~ }
+		#~ print RSCRIPT 'write.table(rna, file = "'.$output_dir.'corrected_data.tab", sep = "\t");'."\n";
+	#~ } else {
+		#~ if ($debug > 0) {
+			#~ print STDERR format_localtime()."DEBUG: Writing corrected data to csv file...\n";
+		#~ }
+		#~ print RSCRIPT 'write.csv(rna, file = "'.$output_dir.'corrected_data.csv");'."\n";
+	#~ }
+#~ } elsif ($data_type eq "mRNA") {
+	#~ if ($tabdelimited_output) {
+		#~ if ($debug > 0) {
+			#~ print STDERR format_localtime()."DEBUG: Writing raw data to tab delimited file...\n";
+		#~ }
+		#~ print RSCRIPT 'write.table(rna, file = "'.$output_dir.'raw_data.tab", sep = "\t");'."\n";
+	#~ } else {
+		#~ if ($debug > 0) {
+			#~ print STDERR format_localtime()."DEBUG: Writing raw data to csv file...\n";
+		#~ }
+		#~ print RSCRIPT 'write.csv(rna, file = "'.$output_dir.'raw_data.csv");'."\n";
+	#~ }
+#~ }
+# Output raw data to file
 if ($tabdelimited_output) {
 	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Writing corrected data to tab delimited file...\n";
+		print STDERR format_localtime()."DEBUG: Writing raw data to tab delimited file...\n";
 	}
-	$R->send ('write.table(rna, file = "'.$output_dir.'corrected_data.tab", sep = "\t");');
+	print RSCRIPT 'write.table(rna, file = "'.$output_dir.'raw_data.tab", sep = "\t");'."\n";
 } else {
 	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Writing corrected data to csv file...\n";
+		print STDERR format_localtime()."DEBUG: Writing raw data to csv file...\n";
 	}
-	$R->send ('write.csv(rna, file = "'.$output_dir.'corrected_data.csv");');
+	print RSCRIPT 'write.csv(rna, file = "'.$output_dir.'raw_data.csv");'."\n";
 }
-# Control count normalization - positive/negative counts
-# Positive control count
-if ($debug > 0) {
-	print STDERR format_localtime()."DEBUG: Processing positive normalization...\n";
+
+# Output housekeeping data to file, if t-test or ANOVA
+if (($test_type eq 'ttest') || ($test_type eq 'ANOVA')) {
+	if ($tabdelimited_output) {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Writing housekeeping to tab delimited file...\n";
+		}
+		print RSCRIPT 'write.table(housekeeping, file = "'.$output_dir.'housekeeping.tab", sep = "\t");'."\n";
+	} else {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Writing housekeeping to csv file...\n";
+		}
+		print RSCRIPT 'write.csv(housekeeping, file = "'.$output_dir.'housekeeping.csv");'."\n";
+	}
 }
-$R->send ('# Sum each sample/column for positive total counts
+
+if (($test_type eq 'ttest') || ($test_type eq 'ANOVA')) {
+	# Control count normalization - positive/negative counts
+	# Positive control count
+	if ($debug > 0) {
+		print STDERR format_localtime()."DEBUG: Processing positive normalization...\n";
+	}
+	print RSCRIPT '# Sum each sample/column for positive total counts
 pos_col_sum <- colSums(positive);
 # Obtain the total mean for positive total counts
 pos_total_mean <- sum(positive)/ncol(positive);
@@ -485,338 +502,341 @@ for (i in c(1:nrow(rna))) {
 	for (j in c(1:ncol(rna))) {
 		pos_rna[i,j] <- rna[i,j]*pos_norm[j];
 	}
+}'."\n";
+	# Process warnings
+	if ($warnings) {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Processing warnings type 3...\n";
+		}
+		# 3. Positive control normalization - factor should be between 0.3 and 3; flag if not
+		print RSCRIPT '# 3. Positive control normalization - factor should be between 0.3 and 3; flag if not
+warnings <- c();
+for (i in c(1:length(pos_norm))) {
+	if (pos_norm[i] < 0.3) {
+		warnings <- append(warnings, paste("WARNING:", file_names[i], "has positive control normalization factor < 0.3 (", pos_norm[i], ")."));
+	} else if (pos_norm[i] > 3) {
+		warnings <- append(warnings, paste("WARNING:", file_names[i], "has positive control normalization factor > 3 (", pos_norm[i], ")."));
+	}
 }
-# apply to negative
-for (i in c(1:nrow(negative))) {
-	for (j in c(1:ncol(negative))) {
-		negative[i,j] <- negative[i,j]*pos_norm[j];
+if (length(warnings) > 0) {
+	FILEWRITE <- file("'.$warnings_file.'", open = "a");
+	writeLines(warnings, FILEWRITE);
+	close(FILEWRITE);
+}'."\n";
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Processing warnings type 4...\n";
+		}
+		# 4. 0.5fM control counts should be above average of negative controls in 90% of lanes
+		print RSCRIPT '# 4. 0.5fM control counts should be above average of negative controls in 90% of lanes
+warnings <- c();
+lanes <- c();
+half.fM <- c();
+neg.count.mean <- c();
+for (i in c(1:ncol(negative))) {
+	negative_mean <- sum(negative[,i]) / nrow(negative);
+	if (negative_mean > positive[\'POS_E(0.5)\', i]) {
+		lanes <- append(lanes, file_names[i]);
+		half.fM <- append(half.fM, positive[\'POS_E(0.5)\', i]);
+		neg.count.mean <- append(neg.count.mean, negative_mean);
 	}
 }
-# apply to housekeeping
-for (i in c(1:nrow(housekeeping))) {
-	for (j in c(1:ncol(housekeeping))) {
-		housekeeping[i,j] <- housekeeping[i,j]*pos_norm[j];
-	}
-}');
-# Process warnings
-if ($warnings) {
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Processing warnings type 3...\n";
-	}
-	# 3. Positive control normalization - factor should be between 0.3 and 3; flag if not
-	$R->send ('# 3. Positive control normalization - factor should be between 0.3 and 3; flag if not
-	warnings <- c("# 3. Positive control normalization - factor should be between 0.3 and 3; flag if not");
-	for (i in c(1:length(pos_norm))) {
-		if (pos_norm[i] < 0.3) {
-			warnings <- append(warnings, paste("WARNING:", file_names[i], "has positive control normalization factor < 0.3 (", pos_norm[i], ")."));
-		} else if (pos_norm[i] > 3) {
-			warnings <- append(warnings, paste("WARNING:", file_names[i], "has positive control normalization factor > 3 (", pos_norm[i], ")."));
-		}
-	}
-	if (length(warnings) > 0) {
-		FILEWRITE <- file("'.$warnings_file.'", open = "a");
-		writeLines(warnings, FILEWRITE);
-		close(FILEWRITE);
-	}');
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Processing warnings type 4...\n";
-	}
-	# 4. 0.5fM control counts should be above average of negative controls in 90% of lanes
-	$R->send ('# 4. 0.5fM control counts should be above average of negative controls in 90% of lanes
-	warnings <- c("# 4. 0.5fM control counts should be above average of negative controls in 90% of lanes");
-	lanes <- c();
-	half.fM <- c();
-	neg.count.mean <- c();
-	for (i in c(1:ncol(negative))) {
-		negative_mean <- sum(negative[,i]) / nrow(negative);
-		if (negative_mean > positive[\'POS_E(0.5)\', i]) {
-			lanes <- append(lanes, file_names[i]);
-			half.fM <- append(half.fM, positive[\'POS_E(0.5)\', i]);
-			neg.count.mean <- append(neg.count.mean, negative_mean);
-		}
-	}
-	if ((length(lanes) / length(file_names)) > 0.1) {
-		warnings <- append(warnings, paste("WARNING:", lanes, "has 0.5fM control counts (", half.fM, ") below average of negative controls (", neg.count.mean, ")."));
-	}
-	if (length(warnings) > 0) {
-		FILEWRITE <- file("'.$warnings_file.'", open = "a");
-		writeLines(warnings, FILEWRITE);
-		close(FILEWRITE);
-	}');
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Processing warnings type 5...\n";
-	}
-	# 5. Linear correlation of positive controls vs concentration should have R^2 greater than 0.95 in at least 90% of lanes
-	$R->send ('# 5. Linear correlation of positive controls vs concentration should have R^2 greater than 0.95 in at least 90% of lanes
-	warnings <- c("# 5. Linear correlation of positive controls vs concentration should have R^2 greater than 0.95 in at least 90% of lanes");
-	r2 <- c();
-	r2.val <- c();
-	# Extract concentrations
-	conc <- as.numeric(gsub("[^0-9.]", "", rownames(positive)));
-	# Process linear correlation for every column
-	for (i in c(1:ncol(positive))) {
-		pos_df <- data.frame(conc = conc, count = positive[,i]);
-		positive.lm <- lm(formula = conc ~ count, data = pos_df);
-		if (summary(positive.lm)$r.squared < 0.95) {
-			r2 <- append(r2, file_names[i]);
-			r2.val <- append(r2.val, summary(positive.lm)$r.squared);
-		}
-	}
-	if ((length(r2) / length(file_names)) > 0.1) {
-		warnings <- append(warnings, paste("WARNING: Linear correlation of positive controls vs concentration in", r2, "has R^2 less than 0.95 (", r2.val, ")."));
-	}
-	if (length(warnings) > 0) {
-		FILEWRITE <- file("'.$warnings_file.'", open = "a");
-		writeLines(warnings, FILEWRITE);
-		close(FILEWRITE);
-	}');
+if ((length(lanes) / length(file_names)) > 0.1) {
+	warnings <- append(warnings, paste("WARNING:", lanes, "has 0.5fM control counts (", half.fM, ") below average of negative controls (", neg.count.mean, ")."));
 }
-# Output positive normalized data to file
-if ($tabdelimited_output) {
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Writing positive normalization to tab delimited file...\n";
+if (length(warnings) > 0) {
+	FILEWRITE <- file("'.$warnings_file.'", open = "a");
+	writeLines(warnings, FILEWRITE);
+	close(FILEWRITE);
+}'."\n";
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Processing warnings type 5...\n";
+		}
+		# 5. Linear correlation of positive controls vs concentration should have R^2 greater than 0.95 in at least 90% of lanes
+		print RSCRIPT '# 5. Linear correlation of positive controls vs concentration should have R^2 greater than 0.95 in at least 90% of lanes
+warnings <- c();
+r2 <- c();
+r2.val <- c();
+# Extract concentrations
+conc <- as.numeric(gsub("[^0-9.]", "", rownames(positive)));
+# Process linear correlation for every column
+for (i in c(1:ncol(positive))) {
+	pos_df <- data.frame(conc = conc, count = positive[,i]);
+	positive.lm <- lm(formula = conc ~ count, data = pos_df);
+	if (summary(positive.lm)$r.squared < 0.95) {
+		r2 <- append(r2, file_names[i]);
+		r2.val <- append(r2.val, summary(positive.lm)$r.squared);
 	}
-	$R->send ('write.table(pos_rna, file = "'.$output_dir.'positive_normalized.tab", sep = "\t");');
-} else {
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Writing positive normalization to csv file...\n";
-	}
-	$R->send ('write.csv(pos_rna, file = "'.$output_dir.'positive_normalized.csv");');
 }
-# Negative control count
-# Several options for negative control count normalization
-# Any count below the calculated is considered undetectable
-my $negative_threshold = 0;
-$R->send('neg_rna <- rna; # copy rna to get col and row names');
-if ($negative_type == 1) {
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Processing negative normalization type 1...\n";
-	}
-	# 1. Sum each sample/column for negative control counts and use mean
-	$R->send ('neg_col_mean <- colMeans(negative);
-	for (i in c(1:nrow(rna))) {
-		for (j in c(1:ncol(rna))) {
-			neg_rna[i,j] <- pos_rna[i,j]-neg_col_mean[j];
-		}
-	}');
-} elsif ($negative_type == 2) {
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Processing negative normalization type 2...\n";
-	}
-	# 2. Calculate the standard deviation for each column and calculate two
-	# standard deviations above the mean
-	$R->send ('neg_col_mean <- colMeans(negative);
-	neg_col_sd <- c();
-	for (j in c(1:ncol(negative))) {
-		neg_col_sd[j] <- sd(negative[,j]);
-	}
-	for (i in c(1:nrow(rna))) {
-		for (j in c(1:ncol(rna))) {
-			neg_rna[i,j] <- pos_rna[i,j]-(neg_col_mean[j]+2*neg_col_sd[j]);
-		}
-	}');
-} elsif ($negative_type == 3) {
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Processing negative normalization type 3...\n";
-	}
-	# 3. Maximum value of negative controls
-	$R->send ('neg_col_max <- c();
-	for (j in c(1:ncol(negative))) {
-		neg_col_max[j] <- max(negative[,j]);
-	}
-	for (i in c(1:nrow(rna))) {
-		for (j in c(1:ncol(rna))) {
-			neg_rna[i,j] <- pos_rna[i,j]-neg_col_max[j];
-		}
-	}');
-} elsif ($negative_type == 4) {
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Processing negative normalization type 4...\n";
-	}
-	# 4. Perform a one tailed Student's t-test (with default p-value=0.05)
-	$R->send ('posrna_row_mean <- rowMeans(pos_rna);
-	for (i in (1:nrow(pos_rna))) {
-		t_test <- t.test(negative,y=pos_rna[i,],alternative="less");
-		if (t_test$p.value < '.$negative4_ttest_pvalue.') {
-			for (j in (1:ncol(pos_rna))) {
-				neg_rna[i,j] <- pos_rna[i,j]-posrna_row_mean[i];
-			}
-		} else {
-			for (j in (1:ncol(pos_rna))) {
-				neg_rna[i,j] <- 0;
-			}
-		}
-	}');
+if ((length(r2) / length(file_names)) > 0.1) {
+	warnings <- append(warnings, paste("WARNING: Linear correlation of positive controls vs concentration in", r2, "has R^2 less than 0.95 (", r2.val, ")."));
 }
-# Pull values <= 0 in neg_rna up to 0
-if ($debug > 0) {
-	print STDERR format_localtime()."DEBUG: Processing negative normalization values below zero...\n";
+if (length(warnings) > 0) {
+	FILEWRITE <- file("'.$warnings_file.'", open = "a");
+	writeLines(warnings, FILEWRITE);
+	close(FILEWRITE);
+}'."\n";
+	}
+	# Output positive normalized data to file
+	if ($tabdelimited_output) {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Writing positive normalization to tab delimited file...\n";
+		}
+		print RSCRIPT 'write.table(pos_rna, file = "'.$output_dir.'positive_normalized.tab", sep = "\t");'."\n";
+	} else {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Writing positive normalization to csv file...\n";
+		}
+		print RSCRIPT 'write.csv(pos_rna, file = "'.$output_dir.'positive_normalized.csv");'."\n";
+	}
+	# Negative control count
+	# Several options for negative control count normalization
+	# Any count below the calculated is considered undetectable
+	my $negative_threshold = 0;
+	print RSCRIPT 'neg_rna <- rna; # copy rna to get col and row names'."\n";
+	if ($negative_type == 1) {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Processing negative normalization type 1...\n";
+		}
+		# 1. Sum each sample/column for negative control counts and use mean
+		print RSCRIPT 'neg_col_mean <- colMeans(negative);
+for (i in c(1:nrow(rna))) {
+	for (j in c(1:ncol(rna))) {
+		neg_rna[i,j] <- pos_rna[i,j]-neg_col_mean[j];
+	}
+}'."\n";
+	} elsif ($negative_type == 2) {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Processing negative normalization type 2...\n";
+		}
+		# 2. Calculate the standard deviation for each column and calculate two
+		# standard deviations above the mean
+		print RSCRIPT 'neg_col_mean <- colMeans(negative);
+neg_col_sd <- c();
+for (j in c(1:ncol(negative))) {
+	neg_col_sd[j] <- sd(negative[,j]);
 }
-$R->send ('# set any values below 0 to 0
+for (i in c(1:nrow(rna))) {
+	for (j in c(1:ncol(rna))) {
+		neg_rna[i,j] <- pos_rna[i,j]-(neg_col_mean[j]+2*neg_col_sd[j]);
+	}
+}'."\n";
+	} elsif ($negative_type == 3) {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Processing negative normalization type 3...\n";
+		}
+		# 3. Maximum value of negative controls
+		print RSCRIPT 'neg_col_max <- c();
+for (j in c(1:ncol(negative))) {
+	neg_col_max[j] <- max(negative[,j]);
+}
+for (i in c(1:nrow(rna))) {
+	for (j in c(1:ncol(rna))) {
+		neg_rna[i,j] <- pos_rna[i,j]-neg_col_max[j];
+	}
+}'."\n";
+	} elsif ($negative_type == 4) {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Processing negative normalization type 4...\n";
+		}
+		# 4. Perform a one tailed Student's t-test (with default p-value=0.05)
+		print RSCRIPT 'posrna_row_mean <- rowMeans(pos_rna);
+for (i in (1:nrow(pos_rna))) {
+	t_test <- t.test(negative,y=pos_rna[i,],alternative="less");
+	if (t_test$p.value < '.$negative4_ttest_pvalue.') {
+		for (j in (1:ncol(pos_rna))) {
+			neg_rna[i,j] <- pos_rna[i,j]-posrna_row_mean[i];
+		}
+	} else {
+		for (j in (1:ncol(pos_rna))) {
+			neg_rna[i,j] <- 0;
+		}
+	}
+}'."\n";
+	}
+	# Pull values <= 0 in neg_rna up to 0
+	if ($debug > 0) {
+		print STDERR format_localtime()."DEBUG: Processing negative normalization values below zero...\n";
+	}
+	print RSCRIPT '# set any values below 0 to 0
 for (i in (1:nrow(neg_rna))) {
 	for (j in (1:ncol(neg_rna))) {
 		if (neg_rna[i,j] <= 0) {
 			neg_rna[i,j] <- 0;
 		}
 	}
-}');
-# Output negative normalized data to file
-if ($tabdelimited_output) {
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Writing negative normalization to tab delimited file...\n";
+}'."\n";
+	# Output negative normalized data to file
+	if ($tabdelimited_output) {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Writing negative normalization to tab delimited file...\n";
+		}
+		print RSCRIPT 'write.table(neg_rna, file = "'.$output_dir.'negative_normalized.tab", sep = "\t");'."\n";
+	} else {
+		if ($debug > 0) {
+			print STDERR format_localtime()."DEBUG: Writing negative normalization to csv file...\n";
+		}
+		print RSCRIPT 'write.csv(neg_rna, file = "'.$output_dir.'negative_normalized.csv");'."\n";
 	}
-	$R->send ('write.table(neg_rna, file = "'.$output_dir.'negative_normalized.tab", sep = "\t");');
-} else {
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Writing negative normalization to csv file...\n";
-	}
-	$R->send ('write.csv(neg_rna, file = "'.$output_dir.'negative_normalized.csv");');
-}
 
-if ($normalize_samplecontent) {
-	$R->send('norm_rna <- rna; # copy rna to get col and row names');
+	print RSCRIPT 'norm_rna <- rna; # copy rna to get col and row names'."\n";
 	if ($samplecontent_type == 1) {
 		if ($debug > 0) {
 			print STDERR format_localtime()."DEBUG: Processing sample content normalization type 1...\n";
 		}
 		# 1. Normalize for sample content with housekeeping genes (mRNA) 
-		$R->send ('# Sum each column for housekeeping total counts
-		house_col_sum <- colSums(housekeeping);
-		# Obtain the total mean for housekeeping total counts
-		house_total_mean <- sum(housekeeping)/ncol(housekeeping);
-		# Calculate the normalization factor for each column
-		house_norm <- c();
-		house_norm <- house_total_mean/house_col_sum;
-		# Apply normalization factor by multiplying with raw data
-		# apply to neg_rna
-		for (i in c(1:nrow(neg_rna))) {
-			for (j in c(1:ncol(neg_rna))) {
-				norm_rna[i,j] <- neg_rna[i,j]*house_norm[j];
-			}
-		}');
+		print RSCRIPT '# Sum each column for housekeeping total counts
+house_col_sum <- colSums(housekeeping);
+# Obtain the total mean for housekeeping total counts
+house_total_mean <- sum(housekeeping)/ncol(housekeeping);
+# Calculate the normalization factor for each column
+house_norm <- c();
+house_norm <- house_total_mean/house_col_sum;
+# Apply normalization factor by multiplying with raw data
+# apply to neg_rna
+for (i in c(1:nrow(neg_rna))) {
+	for (j in c(1:ncol(neg_rna))) {
+		norm_rna[i,j] <- neg_rna[i,j]*house_norm[j];
+	}
+}'."\n";
 	} elsif ($samplecontent_type == 2) {
 		if ($debug > 0) {
 			print STDERR format_localtime()."DEBUG: Processing sample content normalization type 2...\n";
 		}
 		# 2. Normalize for sample content with entire sample (miRNA)
-		$R->send ('# Sum each column for all miRNA total counts
-		negrna_col_sum <- colSums(neg_rna);
-		# Obtain the total mean for all total counts
-		negrna_total_mean <- sum(neg_rna)/ncol(neg_rna);
-		# Calculate the normalization factor for each column
-		negrna_norm <- c();
-		negrna_norm <- negrna_total_mean/negrna_col_sum;
-		# Apply normalization factor by multiplying with raw data
-		# apply to neg_rna
-		for (i in c(1:nrow(neg_rna))) {
-			for (j in c(1:ncol(neg_rna))) {
-				norm_rna[i,j] <- neg_rna[i,j]*negrna_norm[j];
-			}
-		}');
+		print RSCRIPT '# Sum each column for all miRNA total counts
+negrna_col_sum <- colSums(neg_rna);
+# Obtain the total mean for all total counts
+negrna_total_mean <- sum(neg_rna)/ncol(neg_rna);
+# Calculate the normalization factor for each column
+negrna_norm <- c();
+negrna_norm <- negrna_total_mean/negrna_col_sum;
+# Apply normalization factor by multiplying with raw data
+# apply to neg_rna
+for (i in c(1:nrow(neg_rna))) {
+	for (j in c(1:ncol(neg_rna))) {
+		norm_rna[i,j] <- neg_rna[i,j]*negrna_norm[j];
+	}
+}'."\n";
 	} elsif ($samplecontent_type == 3) {
 		if ($debug > 0) {
 			print STDERR format_localtime()."DEBUG: Processing sample content normalization type 3...\n";
 		}
 		# 3. Normalize for sample content with highest miRNAs in sample (miRNA)
-		$R->send ('# Sort the data by one column in descending order
-		sort.neg_rna <- neg_rna[order(-neg_rna[,'.$samplecontent3_columntosort.'])];
-		# Take the first top count rows to work with
-		sort.neg_rna <- sort.neg_rna[1:'.$samplecontent3_topcounts.',]
-		# Sum each column for selected total counts
-		sortnegrna_col_sum <- colSums(sort.neg_rna);
-		# Obtain the average total for selected total counts
-		sortnegrna_total_mean <- sum(sort.neg_rna)/ncol(sort.neg_rna);
-		# Calculate the normalization factor for each column
-		sortnegrna_norm <- c();
-		sortnegrna_norm <- sortnegrna_total_mean/sortnegrna_col_sum;
-		# Apply normalization factor by multiplying with raw data
-		# apply to neg_rna
-		for (i in c(1:nrow(neg_rna))) {
-			for (j in c(1:ncol(neg_rna))) {
-				norm_rna[i,j] <- neg_rna[i,j]*sortnegrna_norm[j];
-			}
-		}');
+		print RSCRIPT '# Sort the data by one column in descending order
+sort.neg_rna <- neg_rna[order(-neg_rna[,'.$samplecontent3_columntosort.'])];
+# Take the first top count rows to work with
+sort.neg_rna <- sort.neg_rna[1:'.$samplecontent3_topcounts.',]
+# Sum each column for selected total counts
+sortnegrna_col_sum <- colSums(sort.neg_rna);
+# Obtain the average total for selected total counts
+sortnegrna_total_mean <- sum(sort.neg_rna)/ncol(sort.neg_rna);
+# Calculate the normalization factor for each column
+sortnegrna_norm <- c();
+sortnegrna_norm <- sortnegrna_total_mean/sortnegrna_col_sum;
+# Apply normalization factor by multiplying with raw data
+# apply to neg_rna
+for (i in c(1:nrow(neg_rna))) {
+	for (j in c(1:ncol(neg_rna))) {
+		norm_rna[i,j] <- neg_rna[i,j]*sortnegrna_norm[j];
+	}
+}'."\n";
 	}
 	# Output sample content normalized data to file
 	if ($tabdelimited_output) {
 		if ($debug > 0) {
 			print STDERR format_localtime()."DEBUG: Writing sample content normalization to tab delimited file...\n";
 		}
-		$R->send ('write.table(norm_rna, file = "'.$output_dir.'sample_content_normalized.tab", sep = "\t");');
+		print RSCRIPT 'write.table(norm_rna, file = "'.$output_dir.'sample_content_normalized.tab", sep = "\t");'."\n";
 	} else {
 		if ($debug > 0) {
 			print STDERR format_localtime()."DEBUG: Writing sample content normalization to csv file...\n";
 		}
-		$R->send ('write.csv(norm_rna, file = "'.$output_dir.'sample_content_normalized.csv");');
+		print RSCRIPT 'write.csv(norm_rna, file = "'.$output_dir.'sample_content_normalized.csv");'."\n";
 	}
-} else {
-	# Set negative normalized to normalized data frame
-	if ($debug > 0) {
-		print STDERR format_localtime()."DEBUG: Setting negative normalization to normalized data to analyze...\n";
-	}
-	$R->send ('norm_rna <- neg_rna;');
 }
 
 # Remove rows that have 0 total counts
 #if ($debug > 0) {
 #	print STDERR format_localtime()."DEBUG: Removing genes that have zero counts across all samples...\n";
 #}
-#$R->send ('# remove any rows that sum to 0
+#print RSCRIPT '# remove any rows that sum to 0
 #norm_rna <- norm_rna[rowSums(norm_rna) > 0, ];');
+
+close (RSCRIPT);
 
 # Check for test specified and generate heatmap if test_type is valid
 if ($debug > 0) {
 	print STDERR format_localtime()."DEBUG: Starting test to generate heatmap...\n";
 }
 if ($test_type eq 'ttest') {
+	NanoString::TTest->setScript ($tmp_R_dir.'generate_heatmap.R');
 	NanoString::TTest->setDebug ($debug);
 	NanoString::TTest->setDebugVerbosity ($debug_verbosity);
-	NanoString::TTest->applyTTest ($R, \@rawdata_conds, $tabdelimited_output, $output_dir, $adjpvalue_cutoff, $mean_cutoff, $adjpvalue, $adjpvalue_type);
-	NanoString::TTest->generateHeatmap ($R, $output_dir, $heatmap_colors, $heatmap_clustercols, $heatmap_key);
-} elsif (($test_type eq 'DESeq') && (!$normalize_samplecontent)) { # Don't normalize to content twice
+	NanoString::TTest->applyTTest (\@rawdata_conds, $tabdelimited_output, $output_dir, $adjpvalue_cutoff, $mean_cutoff, $adjpvalue, $adjpvalue_type);
+	NanoString::TTest->generateHeatmap ($output_dir, $heatmap_colors, $heatmap_clustercols, $heatmap_key, $warnings_file);
+} elsif ($test_type eq 'DESeq') {
+	NanoString::DESeq->setScript ($tmp_R_dir.'generate_heatmap.R');
 	NanoString::DESeq->setDebug ($debug);
 	NanoString::DESeq->setDebugVerbosity ($debug_verbosity);
-	NanoString::DESeq->applyDESeq ($R, \@rawdata_conds, $tabdelimited_output, $output_dir, $adjpvalue_cutoff, $mean_cutoff, $adjpvalue, $adjpvalue_type);
-	NanoString::DESeq->generateHeatmap ($R, $output_dir, $heatmap_colors, $heatmap_clustercols, $heatmap_key);
+	NanoString::DESeq->applyDESeq (\@rawdata_conds, $tabdelimited_output, $output_dir, $adjpvalue_cutoff, $mean_cutoff, $adjpvalue, $adjpvalue_type);
+	NanoString::DESeq->generateHeatmap ($output_dir, $heatmap_colors, $heatmap_clustercols, $heatmap_key, $warnings_file);
 } elsif ($test_type eq 'ANOVA') {
+	NanoString::ANOVA->setScript ($tmp_R_dir.'generate_heatmap.R');
 	NanoString::ANOVA->setDebug ($debug);
 	NanoString::ANOVA->setDebugVerbosity ($debug_verbosity);
-	NanoString::ANOVA->applyANOVA ($R, \@rawdata_conds, $tabdelimited_output, $output_dir, $adjpvalue_cutoff, $mean_cutoff, $adjpvalue, $adjpvalue_type);
-	NanoString::ANOVA->generateHeatmap ($R, $output_dir, $heatmap_colors, $heatmap_clustercols, $heatmap_key);
+	NanoString::ANOVA->applyANOVA (\@rawdata_conds, $tabdelimited_output, $output_dir, $adjpvalue_cutoff, $mean_cutoff, $adjpvalue, $adjpvalue_type);
+	NanoString::ANOVA->generateHeatmap ($output_dir, $heatmap_colors, $heatmap_clustercols, $heatmap_key, $warnings_file);
 } elsif ($test_type eq 'ANOVAnegbin') {
+	NanoString::ANOVAnegbin->setScript ($tmp_R_dir.'generate_heatmap.R');
 	NanoString::ANOVAnegbin->setDebug ($debug);
 	NanoString::ANOVAnegbin->setDebugVerbosity ($debug_verbosity);
-	NanoString::ANOVAnegbin->applyANOVA ($R, \@rawdata_conds, $tabdelimited_output, $output_dir, $adjpvalue_cutoff, $mean_cutoff, $adjpvalue, $adjpvalue_type);
-	NanoString::ANOVAnegbin->generateHeatmap ($R, $output_dir, $heatmap_colors, $heatmap_clustercols, $heatmap_key);
+	NanoString::ANOVAnegbin->applyANOVA (\@rawdata_conds, $tabdelimited_output, $output_dir, $adjpvalue_cutoff, $mean_cutoff, $adjpvalue, $adjpvalue_type);
+	NanoString::ANOVAnegbin->generateHeatmap ($output_dir, $heatmap_colors, $heatmap_clustercols, $heatmap_key, $warnings_file);
 } else {
 	print STDERR format_localtime()."ERROR: No valid test chosen for heatmap generation.\n";
 }
 
+# Run R
+if ($debug > 0) {
+	print STDERR format_localtime()."DEBUG: Executing tmp R script...\n";
+}
+my @args = "R-devel -f ".$tmp_R_dir."generate_heatmap.R";
+system (@args);
+
+# Delete R script
+unlink ($tmp_R_dir.'generate_heatmap.R');
+rmdir ($tmp_R_dir);
+
 # Stop R and exit
-if ($debug > 0) {
-	print STDERR format_localtime()."DEBUG: Stopping R...\n";
-}
-$R->stopR ();
+#~ if ($debug > 0) {
+	#~ print STDERR format_localtime()."DEBUG: Stopping R...\n";
+#~ }
+#~ $R->stopR ();
 # Wait for R to finish
-if ($debug > 0) {
-	print STDERR format_localtime()."DEBUG: Waiting for R to close...\n";
-}
-my $pid = Unix::PID->new ();
-my $R_pid = $pid->get_pid_from_pidfile($R_log_dir_base.$R_log_dir.'/R.pid');
-$pid->wait_for_pidsof (
-	{
-		'pid_list'	=> ($R_pid),
-		'sleep_for'	=> 15, # in seconds
-		'max_loops'	=> 4, # if not done, might be stuck
-		'hit_max_loops' => sub {
-			$pid->kill(9, $R_pid);
-		},
-	}
-);
+#~ if ($debug > 0) {
+	#~ print STDERR format_localtime()."DEBUG: Waiting for R to close...\n";
+#~ }
+#~ my $pid = Unix::PID->new ();
+#~ my $R_pid = $pid->get_pid_from_pidfile($R_log_dir_base.$R_log_dir.'/R.pid');
+#~ $pid->wait_for_pidsof (
+	#~ {
+		#~ 'pid_list'	=> ($R_pid),
+		#~ 'sleep_for'	=> 15, # in seconds
+		#~ 'max_loops'	=> 4, # if not done, might be stuck
+		#~ 'hit_max_loops' => sub {
+			#~ $pid->kill(9, $R_pid);
+		#~ },
+	#~ }
+#~ );
 # Clean up log directory for Statistics::R
+#~ if ($debug > 0) {
+	#~ print STDERR format_localtime()."DEBUG: Cleaning up R log directories...\n";
+#~ }
+#~ rmdir ($R_log_dir_base.$R_log_dir."/output");
+#~ rmdir ($R_log_dir_base.$R_log_dir);
+
 if ($debug > 0) {
-	print STDERR format_localtime()."DEBUG: Cleaning up R log directories...\n";
+	print STDERR format_localtime()."DEBUG: Done.\n";
 }
-rmdir ($R_log_dir_base.$R_log_dir."/output");
-rmdir ($R_log_dir_base.$R_log_dir);
+
 exit (0);

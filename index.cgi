@@ -72,8 +72,8 @@ ENDHTML1
 	</div>
 
 	<div class="navigation">
-		<a href="/contact.html">Contact Us</a>
 		<a href="/about.html">About</a>
+		<a href="/license.html">License</a>
 		<a href="/faq.html">FAQ</a>
 		<a href="/">Upload Data</a>
 		<div class="clearer"><span></span></div>
@@ -100,7 +100,7 @@ ENDHTML1
 
 	<div class="holder">
 
-		<div class="footer">&copy; 2011 <a href="mailto:nanostring\@achilles.soe.ucsc.edu">Chris Brumbaugh</a>. Valid <a href="http://jigsaw.w3.org/css-validator/check/referer">CSS</a> &amp; <a href="http://validator.w3.org/check?uri=referer">XHTML</a>. Template design by <a href="http://arcsin.se">Arcsin</a>
+		<div class="footer">&copy; 2011 <a href="mailto:admin\@nanostride.soe.ucsc.edu">Chris Brumbaugh</a>. Valid <a href="http://jigsaw.w3.org/css-validator/check/referer">CSS</a> &amp; <a href="http://validator.w3.org/check?uri=referer">XHTML</a>. Template design by <a href="http://arcsin.se">Arcsin</a>
 		</div>
 
 	</div>

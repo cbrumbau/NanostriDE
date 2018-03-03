@@ -66,8 +66,8 @@ ENDHTML1
 	</div>
 
 	<div class="navigation">
-		<a href="/contact.html">Contact Us</a>
 		<a href="/about.html">About</a>
+		<a href="/license.html">License</a>
 		<a href="/faq.html">FAQ</a>
 		<a href="/">Upload Data</a>
 		<div class="clearer"><span></span></div>
@@ -87,7 +87,7 @@ ENDHTML2
 
 	<div class="holder">
 
-		<div class="footer">&copy; 2011 <a href="mailto:nanostring\@achilles.soe.ucsc.edu">Chris Brumbaugh</a>. Valid <a href="http://jigsaw.w3.org/css-validator/check/referer">CSS</a> &amp; <a href="http://validator.w3.org/check?uri=referer">XHTML</a>. Template design by <a href="http://arcsin.se">Arcsin</a>
+		<div class="footer">&copy; 2011 <a href="mailto:admin\@nanostride.soe.ucsc.edu">Chris Brumbaugh</a>. Valid <a href="http://jigsaw.w3.org/css-validator/check/referer">CSS</a> &amp; <a href="http://validator.w3.org/check?uri=referer">XHTML</a>. Template design by <a href="http://arcsin.se">Arcsin</a>
 		</div>
 
 	</div>
@@ -231,6 +231,49 @@ push (@delete_files, glob ($workdir."*.png"));
 push (@delete_files, glob ($workdir."*.zip"));
 unlink (@delete_files);
 
+# Create customized readme file to inform user
+my $readme_file = $work_path.$job_id."/README.txt";
+open (WRITEFILE, ">:utf8", $readme_file);
+print WRITEFILE "The output of the file consists of the following files:\n";
+print WRITEFILE "00a_-_options.txt: The options that were selected to run the current NanoStriDE job.\n";
+print WRITEFILE "00b_-_warnings.txt: Any warnings that are reported to the user. These may consist of warnings regarding issues with the actual NanoString run itself (e.g. problems with binding density, etc.) or report an issue with the differential analysis itself (e.g. the heatmap could not be generated due to an insufficient number of statistically significant genes/probes).\n";
+#~ if ($data_type eq "miRNA") {
+	#~ print WRITEFILE "00c_-_corrected_data.csv/.tab: The human or mouse microRNA probe corrections applied to the raw data for the NanoString platform.\n";
+#~ } elsif ($data_type eq "mRNA") {
+	#~ print WRITEFILE "00c_-_raw_data.csv/.tab: The raw data for the NanoString platform.\n";
+	#~ if (($test_type eq 'ttest') || ($test_type eq 'ANOVA')) {
+		#~ print WRITEFILE "00d_-_housekeeping.csv/.tab: The housekeeping gene data for the NanoString platform.\n";
+	#~ }
+#~ }
+print WRITEFILE "00c_-_raw_data.csv/.tab: The raw data for the NanoString platform.\n";
+if (($test_type eq 'ttest') || ($test_type eq 'ANOVA')) {
+	print WRITEFILE "00d_-_housekeeping.csv/.tab: The housekeeping gene data for the NanoString platform.\n";
+}
+if (($test_type eq 'ttest') || ($test_type eq 'ANOVA')) {
+	print WRITEFILE "01_-_positive_corrected.csv/.tab: The positive corrected data with a multiplicative normalization for the spike-in control sequences with known abundances per NanoString guidelines.\n";
+	print WRITEFILE "02_-_negative_corrected.csv/.tab: The negative corrected data with a subtractive normalization for negative control probes known not to be present in the probe set per NanoString guidelines.\n";
+	print WRITEFILE "03_-_sample_content_normalized.csv/.tab: The sample content normalized data with a multiplicative normalization to ensure that transcript qualntity levels are comparable across samples per NanoString guidelines.\n";
+	if ($test_type eq 'ttest') {
+		print WRITEFILE "04_-_sorted_ttest.csv/.tab: The results of the t-test performed on the sample content normalized data. The columns from left to right are: id (the gene/probe id), baseMean (the mean of a given gene/probe), baseMeanA (the base mean of a given gene/probe for the control group), baseMeanB (the base mean of a given gene/probe for the case group), foldChange (the fold change), log2FoldChange (the log base 2 fold change), p.value (the unadjusted p-value), p.value.adj (the adjusted p-value), statistic (the t-statistic), dm (the difference of the group means).\n";
+	} elsif ($test_type eq 'ANOVA') {
+		print WRITEFILE "04_-_sorted_ANOVA.csv/.tab: The results of the one way ANOVA performed on the sample content normalized data. The columns from left to right are: id (the gene/probe id), baseMean (the mean of a given gene/probe), baseMean# (the base mean of a given gene/probe for the numbered group), sum.of.squares (the sum of squares), mean.square (the mean square), f.value (the F-test statistic), p.value (the unadjusted p-value), p.value.adj (the adjusted p-value).\n";
+	}
+	print WRITEFILE "05a_-_heatmap.csv/.tab: The normalized data for the statistically significant genes (less than the p-value cutoff and greater than the base mean cutoff) that are used in the heatmap.\n";
+	print WRITEFILE "05b_-_heatmap.png: The heatmap for the statistically significant genes.\n";
+} elsif (($test_type eq 'DESeq') || ($test_type eq 'ANOVAnegbin')) {
+	if ($test_type eq 'DESeq') {
+		print WRITEFILE "01_-_DESeq_normalized.csv/.tab: The data normalized by DESeq using default size factors. Refer to 'Anders S. and Huber W., Differential expression analysis for sequence count data. Genome Biology, 2010' for further details.\n";
+		print WRITEFILE "02_-_sorted_DESeq.csv/.tab: The results of DESeq performed on the DESeq normalized data. The columns from left to right are: baseMean (the mean of a given gene/probe), baseMeanA (the base mean of a given gene/probe for the control group), baseMeanB (the base mean of a given gene/probe for the case group), foldChange (the fold change), log2FoldChange (the log base 2 fold change), pval (the unadjusted p-value), padj (the adjusted p-value).\n";
+	} elsif ($test_type eq 'ANOVAnegbin') {
+		print WRITEFILE "01_-_DESeq_ANODEV_normalized.csv/.tab: The data normalized by DESeq using default size factors. Refer to 'Anders S. and Huber W., Differential expression analysis for sequence count data. Genome Biology, 2010' for further details.\n";
+		print WRITEFILE "02_-_sorted_DESeq_ANODEV.csv/.tab: The results of the one way ANOVA performed on the DESeq normalized data. The columns from left to right are: id (the gene/probe id), baseMean (the mean of a given gene/probe), baseMean# (the base mean of a given gene/probe for the numbered group), p.value (the unadjusted p-value), p.value.adj (the adjusted p-value).\n";
+	}
+	print WRITEFILE "03a_-_heatmap.csv/.tab: The normalized data for the statistically significant genes (less than the p-value cutoff and greater than the base mean cutoff) that are used in the heatmap.\n";
+	print WRITEFILE "03b_-_heatmap.png: The heatmap for the statistically significant genes.\n";
+}
+close (WRITEFILE);
+chmod (0666, $readme_file);
+
 # Create options file to store parameters for user
 # Write options in user readable format
 my $options_file = $work_path.$job_id."/options.txt";
@@ -244,12 +287,12 @@ if (($test_type eq "ttest") or ($test_type eq "DESeq")) {
 	my @case_index = ();
 	my @exclude_index = ();
 	for my $i (0..$#data_label) {
-		if ($data_label[$i] == 0) {
+		if ($data_label[$i] eq "exclude") {
+			push (@exclude_index, $i);
+		} elsif ($data_label[$i] == 0) {
 			push (@control_index, $i);
 		} elsif ($data_label[$i] == 1) {
 			push (@case_index, $i);
-		} elsif ($data_label[$i] eq "exclude") {
-			push (@exclude_index, $i);
 		}
 	}
 	my @control = ();
@@ -323,9 +366,9 @@ if (($test_type eq "ANOVA") or ($test_type eq "ANOVAnegbin")) {
 	print WRITEFILE "Excluded samples: ".join (', ', @exclude)."\n";
 }
 print WRITEFILE "Data type: ".$data_type."\n";
-if ($data_type eq "miRNA") {
-	print WRITEFILE "Sample type correction: ".$sample_type."\n";
-}
+#~ if ($data_type eq "miRNA") {
+	#~ print WRITEFILE "Sample type correction: ".$sample_type."\n";
+#~ }
 my $negative_print = '';
 if ($negative_normalization == 1) {
 	$negative_print = "Mean";
@@ -336,9 +379,11 @@ if ($negative_normalization == 1) {
 } elsif ($negative_normalization == 4) {
 	$negative_print = "One tailed Student's t-test";
 }
-print WRITEFILE "Negative normalization: ".$negative_print."\n";
-if ($negative_normalization == 4) {
-	print WRITEFILE "Negative normalization Student's t-test p-value cutoff: ".$$negative_4_pvalue."\n";
+if (($test_type eq 'ttest') || ($test_type eq 'ANOVA')) {
+	print WRITEFILE "Negative correction: ".$negative_print."\n";
+	if ($negative_normalization == 4) {
+		print WRITEFILE "Negative correction Student's t-test p-value cutoff: ".$negative_4_pvalue."\n";
+	}
 }
 if ($test_type eq 'ttest') {
 	print WRITEFILE "Test type: t-test\n";
@@ -432,7 +477,7 @@ push (@flags, '--datatype=\''.$data_type.'\'');
 if ($data_type eq 'miRNA') {
 	push (@flags, '--correctiontype=\''.$sample_type.'\'');
 }
-if (($test_type eq 'ttest') or ($test_type eq 'ANOVA') or ($test_type eq 'ANOVAnegbin')) {
+if (($test_type eq 'ttest') or ($test_type eq 'ANOVA')) {
 	push (@flags, '--normalizecontent');
 }
 push (@flags, '--negative='.$negative_normalization);
@@ -479,7 +524,6 @@ if ($heatmap_key eq 'yes') {
 if ($output_type eq 'tab_delim') {
 	push (@flags, '--taboutput');
 }
-push (@flags, '--Rlogdir=\''.$job_id.'\'');
 push (@flags, '--warnings=1');
 push (@flags, '--debug=1');
 $current_job = join (' ', @flags);
@@ -519,7 +563,7 @@ my $daemon = Proc::Daemon->new (
 	work_dir		=> './',
 	child_STDERR	=> '+>>'.$log_path.$job_id.'.log',
 	pid_file		=> $log_path.$job_id.'_execute.pid',
-	exec_command	=> './execute_job.pl --jobid="'.$job_id.'" --email="'.$email.'" --files="'.join (',', @files).'" --currentjob="'.$current_job.'" --adjpvalue="'.$adjpvalue.'" --adjpvaluetype="'.$adjpvalue_type.'"',
+	exec_command	=> './execute_job.pl --jobid="'.$job_id.'" --email="'.$email.'" --files="'.join (',', @files).'" --currentjob="'.$current_job.'" --anovafeatures="'.$ANOVA_features.'" --adjpvalue="'.$adjpvalue.'" --adjpvaluetype="'.$adjpvalue_type.'"',
 );
 $daemon->Init ();
 

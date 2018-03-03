@@ -16,6 +16,8 @@ $(document).ready(function() {
 		$('.testtype-ANOVA-features-label').hide();
 		$('.testtype-ANOVA-features').hide();
 		$('.testtype-ttest').show();
+		$('.negnorm-label').show();
+		$('.negnorm').show();
 		$('.testtype-scn').show();
 		set_features(2, labeltype.value, all_group);
 	} else if (testtype.value == "DESeq") {
@@ -24,6 +26,8 @@ $(document).ready(function() {
 		$('.testtype-ANOVAnegbin').hide();
 		$('.testtype-ANOVA-features-label').hide();
 		$('.testtype-ANOVA-features').hide();
+		$('.negnorm-label').hide();
+		$('.negnorm').hide();
 		$('.testtype-scn').hide();
 		$('.testtype-DESeq').show();
 		set_features(2, labeltype.value, all_group);
@@ -37,25 +41,29 @@ $(document).ready(function() {
 			$('.testtype-ANOVA-features-label').show();
 			$('.testtype-ANOVA-features').show();
 		}
+		$('.negnorm-label').show();
+		$('.negnorm').show();
 		$('.testtype-scn').show();
 		set_features(ANOVA_features.value, labeltype.value, all_group);
 	} else if (testtype.value == "ANOVAnegbin") {
 		$('.testtype-ttest').hide();
 		$('.testtype-DESeq').hide();
 		$('.testtype-ANOVA').hide();
+		$('.negnorm-label').hide();
+		$('.negnorm').hide();
+		$('.testtype-scn').hide();
 		ANOVA_features = document.getElementById('ANOVAfeatures');
 		if (all_filename.length > 3) {
 			$('.testtype-ANOVAnegbin').show();
 			$('.testtype-ANOVA-features-label').show();
 			$('.testtype-ANOVA-features').show();
 		}
-		$('.testtype-scn').show();
 		set_features(ANOVA_features.value, labeltype.value, all_group);
 	}
 	var negnorm = document.getElementById('negativenormalization');
 	if (negnorm.value != "4") {
 		$('.negnorm-4').hide();
-	} else {
+	} else if ((negnorm.value == "4") && ((testtype.value == "ttest") || (testtype.value == "ANOVA"))) {
 		$('.negnorm-4').show();
 	}
 	$(".labeltype").change(function(){
@@ -72,10 +80,13 @@ $(document).ready(function() {
 	});
 	$(".datatype").change(function(){
 		var val = $(this).val();
+		var scn = document.getElementById('scnselect');
 		if (val != "miRNA") {
 			$('.datatype-mirna').hide();
+			scn.selectedIndex = 0;
 		} else {
 			$('.datatype-mirna').show();
+			scn.selectedIndex = 1;
 		}
 	});
 	$(".testtype").change(function(){
@@ -87,6 +98,12 @@ $(document).ready(function() {
 			$('.testtype-ANOVA-features-label').hide();
 			$('.testtype-ANOVA-features').hide();
 			$('.testtype-ttest').show();
+			$('.negnorm-label').show();
+			$('.negnorm').show();
+			var negnorm = document.getElementById('negativenormalization');
+			if (negnorm.value == "4") {
+				$('.negnorm-4').show();
+			}
 			$('.testtype-scn').show();
 			set_features(2, labeltype.value, all_group);
 		} else if (val == "DESeq") {
@@ -95,6 +112,12 @@ $(document).ready(function() {
 			$('.testtype-ANOVAnegbin').hide();
 			$('.testtype-ANOVA-features-label').hide();
 			$('.testtype-ANOVA-features').hide();
+			$('.negnorm-label').hide();
+			$('.negnorm').hide();
+			var negnorm = document.getElementById('negativenormalization');
+			if (negnorm.value == "4") {
+				$('.negnorm-4').hide();
+			}
 			$('.testtype-scn').hide();
 			$('.testtype-DESeq').show();
 			set_features(2, labeltype.value, all_group);
@@ -108,19 +131,31 @@ $(document).ready(function() {
 				$('.testtype-ANOVA-features-label').show();
 				$('.testtype-ANOVA-features').show();
 			}
+			$('.negnorm-label').show();
+			$('.negnorm').show();
+			var negnorm = document.getElementById('negativenormalization');
+			if (negnorm.value == "4") {
+				$('.negnorm-4').show();
+			}
 			$('.testtype-scn').show();
 			set_features(ANOVA_features.value, labeltype.value, all_group);
 		} else if (val == "ANOVAnegbin") {
 			$('.testtype-ttest').hide();
 			$('.testtype-DESeq').hide();
 			$('.testtype-ANOVA').hide();
+			$('.negnorm-label').hide();
+			$('.negnorm').hide();
+			var negnorm = document.getElementById('negativenormalization');
+			if (negnorm.value == "4") {
+				$('.negnorm-4').hide();
+			}
+			$('.testtype-scn').hide();
 			ANOVA_features = document.getElementById('ANOVAfeatures');
 			if (all_filename.length > 3) {
 				$('.testtype-ANOVAnegbin').show();
 				$('.testtype-ANOVA-features-label').show();
 				$('.testtype-ANOVA-features').show();
 			}
-			$('.testtype-scn').show();
 			set_features(ANOVA_features.value, labeltype.value, all_group);
 		}
 	});
@@ -132,7 +167,7 @@ $(document).ready(function() {
 		var val = $(this).val();
 		if (val != "4") {
 			$('.negnorm-4').hide();
-		} else {
+		} else if (val == "4") {
 			$('.negnorm-4').show();
 		}
 	});

@@ -51,6 +51,8 @@ sub format_localtime {
 	$RCC->getValue ("Lane Attributes", "FovCount");
 	$RCC->getRawData ();
 	$RCC->setRawData ( \@raw_data );
+	$RCC->getCorrections ();
+	$RCC->stripCorrections ();
 	$RCC->getFormattedData ();
 	$RCC->mergeData ( \($RCC2, $RCC3, ...), \@sample_labels, $sample_name_prefix );
 	$RCC->classifyData ();
@@ -117,7 +119,7 @@ sub new {
 							$has_comment = 1;
 						}
 					}
-						if (!$has_comment) {
+					if (!$has_comment) {
 						for (my $i = 0; $i < scalar (@temp); $i++) {
 							$self->{'raw_data'}{$hash_key}[$array_index][$i] = $temp[$i];
 						}
@@ -247,7 +249,7 @@ sub getValue {
 		}
 		return $self->{'raw_data'}{$section}{$key};
 	} else {
-		print STDERR format_localtime()."ERROR: Cannot print Code_Summary.\n";
+		print STDERR format_localtime()."ERROR: Cannot print Code_Summary. Use getRawData to retrieve the raw data.\n";
 		return 0;
 	}
 }
@@ -378,9 +380,136 @@ sub setRawData {
 	return $self;
 }
 
+=head3 getCorrections
+
+	my $corrections_ref = $RCC->getCorrections ();
+
+Retrieves a hash reference to a hash containing correction values.
+Returns a reference to an empty hash if correction values are not
+present in the data or 0 if probe names are completely missing from the
+data.
+
+=cut
+
+sub getCorrections {
+	my $self = shift;
+
+	my %corrections = {}; # hash of correction values
+	my %gene_to_index = (); # hash of specific column headers to array indices
+	my $raw_data_ref = $self->getRawData ();
+	my @raw_data = @{$raw_data_ref};
+	for my $j (0..$#raw_data) {
+		if ($j == 0) {
+			# Map headers to indices
+			%gene_to_index = ();
+			my @row_0 = @{$raw_data[$j]};
+			for my $k (0..$#row_0) {
+				my $header = $raw_data[$j][$k];
+				if ($header eq "Name") {
+					$gene_to_index{$header} = $k;
+				}
+			}
+			# If did not get all required columns, return false
+			if (! (grep {$_ eq "Name"} (keys (%gene_to_index)))) {
+				print STDERR format_localtime()."ERROR: Missing Name column.\n";
+				return 0;
+			}
+		} elsif ($raw_data[$j][0] eq "Message") {
+			# Skip messages
+			next;
+		} else {
+			# Extract corrections, if present
+			my $name = $raw_data[$j][$gene_to_index{"Name"}];
+			if ($name =~ m/(.+)\|([\d.]+)/) {
+				$corrections{$1} = $2;
+			}
+		}
+	}
+
+	if ($debug > 0) {
+		print STDERR format_localtime()."DEBUG: Getting correction values:\n";
+		print STDERR "( ";
+		my $num_corrections = 0;
+		while (my ($key, $value) = each (%corrections)) {
+			if ($debug > 1) {
+				print STDERR "$key => $value";
+			} else {
+				if ($num_corrections < $debug_verbosity) {
+					print STDERR "$key => $value";
+				} else {
+					last;
+				}
+			}
+			$num_corrections++;
+			if ($num_corrections < scalar (keys (%corrections))) {
+				# Print for all except last value
+				if ($debug == 1) {
+					if ($num_corrections < $debug_verbosity) {
+						print STDERR ", ";
+					} else {
+						print STDERR ", ...";
+					}
+				} else {
+					print STDERR ", ";
+				}
+			}
+		}
+		print STDERR " )\n";
+	}
+
+	return \%corrections;
+}
+
+=head3 stripCorrections
+
+	my $RCC = $RCC->stripCorrections ();
+
+Removes all correction values from raw data names if present. Returns a
+reference to a RCC object.
+
+=cut
+
+sub stripCorrections {
+	my $self = shift;
+
+	my %gene_to_index = (); # hash of specific column headers to array indices
+	my $raw_data_ref = $self->getRawData ();
+	my @raw_data = @{$raw_data_ref};
+	for my $j (0..$#raw_data) {
+		if ($j == 0) {
+			# Map headers to indices
+			%gene_to_index = ();
+			my @row_0 = @{$raw_data[$j]};
+			for my $k (0..$#row_0) {
+				my $header = $raw_data[$j][$k];
+				if ($header eq "Name") {
+					$gene_to_index{$header} = $k;
+				}
+			}
+			# If did not get all required columns, return false
+			if (! (grep {$_ eq "Name"} (keys (%gene_to_index)))) {
+				print STDERR format_localtime()."ERROR: Missing Name column.\n";
+				return 0;
+			}
+		} elsif ($raw_data[$j][0] eq "Message") {
+			# Skip messages
+			next;
+		} else {
+			# Remove corrections, if present
+			my $name = $raw_data[$j][$gene_to_index{"Name"}];
+			if ($name =~ m/(.+)\|[\d.]+/) {
+				$raw_data[$j][$gene_to_index{"Name"}] = $1;
+			}
+		}
+	}
+	$self = $self->setRawData (\@raw_data);
+
+	return $self;
+}
+
 =head3 getFormattedData
 
-	my $formatted_data_ref = $RCC->getRawData ( $label );
+	my $formatted_data_ref = $RCC->getFormattedData ( $label );
 
 Retrieves an array containing formatted data values. Formatted data is a
 matrix of all count data with row and column labels in the first column and
@@ -490,10 +619,10 @@ sub getFormattedData {
 
 	my $merged_data_ref = $RCC->mergeData ( \@array_of_other_RCCs, $sample_labels_ref, $sample_name_prefix );
 
-Constructs an array containing merged formatted data values. Formatted data
-is a matrix of all count data with row and column labels in the first column
-and first row, repectively. Returns a reference to the array of merged and
-formatted data.
+Constructs an array containing consolidated formatted data values.
+Formatted data is a matrix of all count data with row and column labels
+in the first column and first row, repectively. Returns a reference to
+the array of consolidated and formatted data.
 
 =cut
 

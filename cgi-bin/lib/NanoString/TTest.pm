@@ -13,9 +13,14 @@ use strict;
 use warnings;
 
 our $VERSION = 1.0;
+our $script = '';
 our $debug = 0;
 our $debug_verbosity = 3;
 
+sub setScript {
+	my ($package, $file) = @_;
+	$script = $file;
+}
 
 sub setDebug {
 	my ($package, $level) = @_;
@@ -62,14 +67,13 @@ t-test and generates a heatmap.
 
 	NanoString::TTest->applyTTest ($R, $raw_conds_ref, $tabdelimited_output, $output_dir, $ttest_pvalue_cutoff, $ttest_mean_cutoff, $pvalue, $adjpvalue_type);
 
-Takes a R session reference, a flag to designate tab delimited output,
-the path to the output directory.
+Takes a flag to designate tab delimited output and the path to the output
+directory.
 
 =cut
 
 sub applyTTest {
 	my $package = shift;
-	my $R = shift;
 	my $rawdata_conds_ref = shift;
 	my @rawdata_conds = @{$rawdata_conds_ref};
 	my $tabdelimited_output = shift;
@@ -78,6 +82,8 @@ sub applyTTest {
 	my $ttest_mean_cutoff = shift;
 	my $adjpvalue = shift;
 	my $adjpvalue_type = shift;
+
+	open (RSCRIPT, '>>', $script);
 
 	my $pvalue_code = '';
 	if ($adjpvalue) {
@@ -108,89 +114,91 @@ sub applyTTest {
 	if ($debug > 0) {
 		print STDERR format_localtime()."DEBUG: Loading libraries and subroutines required for t-test and heatmap generation...\n";
 	}
-		$R->send ('# Load required packages
-	library("Biobase"); # for eset
-	library("genefilter"); # for rowttests
-	library("gtools"); # for foldchange, foldchange2logratio
-	library("pheatmap"); # for pheatmap
+	print RSCRIPT '# Load required packages
+library("Biobase"); # for eset
+library("genefilter"); # for rowttests
+library("gtools"); # for foldchange, foldchange2logratio
+library("pheatmap"); # for pheatmap
 
-	base.means.and.fold.change <- function(x, feature_indices) {
-		this.result <- matrix(NA, nrow = 1, ncol = 5);
-		colnames(this.result) <- c("baseMean", "baseMeanA", "baseMeanB", "foldChange", "log2FoldChange");
-		this.result[1] <- mean(x);
-		this.result[2] <- mean(x[feature_indices[[1]]]);
-		this.result[3] <- mean(x[feature_indices[[2]]]);
-		this.result[4] <- foldchange(this.result[,3], this.result[,2]);
-		this.result[5] <- foldchange2logratio(this.result[,4]);
-		return(this.result)
-	}');
+base.means.and.fold.change <- function(x, feature_indices) {
+	this.result <- matrix(NA, nrow = 1, ncol = 5);
+	colnames(this.result) <- c("baseMean", "baseMeanA", "baseMeanB", "foldChange", "log2FoldChange");
+	this.result[1] <- mean(x);
+	this.result[2] <- mean(x[feature_indices[[1]]]);
+	this.result[3] <- mean(x[feature_indices[[2]]]);
+	this.result[4] <- foldchange(this.result[,3], this.result[,2]);
+	this.result[5] <- foldchange2logratio(this.result[,4]);
+	return(this.result)
+}'."\n";
 
 	# Send the conditions to R
 	if ($debug > 0) {
 		print STDERR format_localtime()."DEBUG: Sending conditions (".join (',', @rawdata_conds).") for t-test...\n";
 	}
-	$R->send ('conds <- array(c('.join (',', @rawdata_conds).'), dim=c('.scalar (@rawdata_conds).'));');
+	print RSCRIPT 'conds <- array(c('.join (',', @rawdata_conds).'), dim=c('.scalar (@rawdata_conds).'));'."\n";
 	
 	# Do t-test on normalized_data
 	if ($debug > 0) {
 		print STDERR format_localtime()."DEBUG: Perform two-sided t-test on normalized data...\n";
 	}
-	$R->send ('eset <- new("ExpressionSet", exprs=data.matrix(norm_rna));
-	ttest <- rowttests(exprs(eset), factor(conds));
-	# Map features to columns by indices
-	features <- sort(unique(conds));
-	feature_indices <- list();
-	for (i in (1:length(features))) {
-		feature_indices[[i]] <- which(conds == features[i]  %in% c(TRUE))
-	}
-	# Calculate mean, mean by feature, fold change, and log_2 ratio of fold change
-	base.mean.and.fold.change <- apply(norm_rna, 1, base.means.and.fold.change, feature_indices = feature_indices);
-	base.mean.and.fold.change <- t(base.mean.and.fold.change);
-	colnames(base.mean.and.fold.change) <- c("baseMean", "baseMeanA", "baseMeanB", "foldChange", "log2FoldChange");
-	# Store calculations into ttest data frame
-	ttest <- cbind(ttest, base.mean.and.fold.change);
-	# Calculate adjusted p-value
-	ttest$p.value.adj <- p.adjust(ttest$p.value, method = "'.$adjpvalue_type.'");
-	# Add id column, change rownames to numbers, reorder columns
-	ttest$id <- rownames(ttest);
-	rownames(ttest) <- 1:nrow(ttest);
-	ttest <- ttest[,c(10,4:8,3,9,1:2)];
-	sort.ttest <- ttest[order(ttest$'.$pvalue_code.'),]; # sort results by p-values');
+	print RSCRIPT 'eset <- new("ExpressionSet", exprs=data.matrix(norm_rna));
+ttest <- rowttests(exprs(eset), factor(conds));
+# Map features to columns by indices
+features <- sort(unique(conds));
+feature_indices <- list();
+for (i in (1:length(features))) {
+	feature_indices[[i]] <- which(conds == features[i])
+}
+# Calculate mean, mean by feature, fold change, and log_2 ratio of fold change
+base.mean.and.fold.change <- apply(norm_rna, 1, base.means.and.fold.change, feature_indices = feature_indices);
+base.mean.and.fold.change <- t(base.mean.and.fold.change);
+colnames(base.mean.and.fold.change) <- c("baseMean", "baseMeanA", "baseMeanB", "foldChange", "log2FoldChange");
+# Store calculations into ttest data frame
+ttest <- cbind(ttest, base.mean.and.fold.change);
+# Calculate adjusted p-value
+ttest$p.value.adj <- p.adjust(ttest$p.value, method = "'.$adjpvalue_type.'");
+# Add id column, change rownames to numbers, reorder columns
+ttest$id <- rownames(ttest);
+rownames(ttest) <- 1:nrow(ttest);
+ttest <- ttest[,c(10,4:8,3,9,1:2)];
+sort.ttest <- ttest[order(ttest$'.$pvalue_code.'),]; # sort results by p-values'."\n";
 
 	# Output t-test to file
 	if ($tabdelimited_output) {
 		if ($debug > 0) {
 			print STDERR format_localtime()."DEBUG: Writing sorted t-test to tab delimited file...\n";
 		}
-		$R->send ('write.table(sort.ttest, file = "'.$output_dir.'sorted_ttest.tab", sep = "\t");');
+		print RSCRIPT 'write.table(sort.ttest, file = "'.$output_dir.'sorted_ttest.tab", sep = "\t");'."\n";
 	} else {
 		if ($debug > 0) {
 			print STDERR format_localtime()."DEBUG: Writing sorted t-test to csv file...\n";
 		}
-		$R->send ('write.csv(sort.ttest, file = "'.$output_dir.'sorted_ttest.csv");');
+		print RSCRIPT 'write.csv(sort.ttest, file = "'.$output_dir.'sorted_ttest.csv");'."\n";
 	}
 
 	# Prepare for heatmap using cutoff values
 	if ($debug > 0) {
 		print STDERR format_localtime()."DEBUG: Prepare for heatmap by taking pval < ".$ttest_pvalue_cutoff."...\n";
 	}
-	$R->send ('pval_row_index <- which((ttest$'.$pvalue_code.' < '.$ttest_pvalue_cutoff.') %in% c(TRUE));
-	filtered_norm_rna <- norm_rna[pval_row_index, ]; # get normalized data with '.$pvalue_code.' < '.$ttest_pvalue_cutoff.'
-	mean_row_index <- which((rowMeans(filtered_norm_rna) > '.$ttest_mean_cutoff.') %in% c(TRUE));
-	filtered_norm_rna <- filtered_norm_rna[mean_row_index, ]; # get normalized data with mean > '.$ttest_mean_cutoff);
+	print RSCRIPT 'pval_row_index <- which((ttest$'.$pvalue_code.' < '.$ttest_pvalue_cutoff.') %in% c(TRUE));
+filtered_norm_rna <- norm_rna[pval_row_index, ]; # get normalized data with '.$pvalue_code.' < '.$ttest_pvalue_cutoff.'
+mean_row_index <- which((rowMeans(filtered_norm_rna) > '.$ttest_mean_cutoff.') %in% c(TRUE));
+filtered_norm_rna <- filtered_norm_rna[mean_row_index, ]; # get normalized data with mean > '.$ttest_mean_cutoff."\n";
 
 	# Output heatmap filtered data to file
 	if ($tabdelimited_output) {
 		if ($debug > 0) {
 			print STDERR format_localtime()."DEBUG: Writing filtered t-test to tab delimited file...\n";
 		}
-		$R->send ('write.table(filtered_norm_rna, file = "'.$output_dir.'heatmap.tab", sep = "\t");');
+		print RSCRIPT 'write.table(filtered_norm_rna, file = "'.$output_dir.'heatmap.tab", sep = "\t");'."\n";
 	} else {
 		if ($debug > 0) {
 			print STDERR format_localtime()."DEBUG: Writing filtered t-test to csv file...\n";
 		}
-		$R->send ('write.csv(filtered_norm_rna, file = "'.$output_dir.'heatmap.csv");');
+		print RSCRIPT 'write.csv(filtered_norm_rna, file = "'.$output_dir.'heatmap.csv");'."\n";
 	}
+
+	close (RSCRIPT);
 
 	return 1;
 }
@@ -199,23 +207,51 @@ sub applyTTest {
 
 	NanoString::TTest->generateHeatmap ($R, $output_dir, $heatmap_colors, $heatmap_clustercols, $heatmap_key);
 
-Takes a R session reference, the output directory, and the heatmap colors.
+Takes the output directory and the heatmap colors.
 
 =cut
 
 sub generateHeatmap {
 	my $package = shift;
-	my $R = shift;
 	my $output_dir = shift;
 	my $heatmap_colors = shift;
 	my $heatmap_clustercols = shift;
 	my $heatmap_key = shift;
+	my $warnings_file = shift;
+
+	open (RSCRIPT, '>>', $script);
+
+	# Check if heatmap can be generated, else provide warning
+	if ($debug > 0) {
+		print STDERR format_localtime()."DEBUG: Processing warnings type 6...\n";
+	}
+	# 6. No statistically significant probes identified, heatmap cannot be generated
+	print RSCRIPT '# 6. No statistically significant probes identified, heatmap cannot be generated
+warnings <- c();
+if (nrow(filtered_norm_rna) == 0) {
+	warnings <- append(warnings, paste("WARNING: No statistically significant probes identified, heatmap cannot be generated."));
+}
+if (nrow(filtered_norm_rna) == 1) {
+	warnings <- append(warnings, paste("WARNING: One statistically significant probe identified, heatmap cannot be generated."));
+}
+if (!exists("filtered_norm_rna")) {
+	warnings <- append(warnings, paste("WARNING: No statistically significant probes identified, heatmap cannot be generated. (Running t-test failed.)"));
+}
+if (length(warnings) > 0) {
+	FILEWRITE <- file("'.$warnings_file.'", open = "a");
+	writeLines(warnings, FILEWRITE);
+	close(FILEWRITE);
+}'."\n";
 
 	# Generate heatmap
 	if ($debug > 0) {
 		print STDERR format_localtime()."DEBUG: Generate heatmap and output to file...\n";
 	}
-	$R->send ('# Convert _ to whitespace
+	print RSCRIPT '# Load Cairo package
+library("Cairo");
+
+if (nrow(filtered_norm_rna) > 1) {
+	# Convert _ to whitespace
 	col_names <- colnames(data.matrix(filtered_norm_rna));
 	col_names <- gsub("(sample_number__)", " ", col_names);
 	col_names <- gsub("_", " ", col_names);
@@ -228,9 +264,12 @@ sub generateHeatmap {
 	# size for plot + size for label margins + size for dendrogram in pixels + outer margins
 	heatmap_height <- length(row_names) * 30 + max_char_col * 8 + 50 + 50;
 	heatmap_width <- length(col_names) * 30 + max_char_row * 8 + 50 + 50 + 75; # add 75 for legend
-	png("'.$output_dir.'heatmap.png", height = heatmap_height, width = heatmap_width, res = 72);
+	CairoPNG(filename = "'.$output_dir.'heatmap.png", height = heatmap_height, width = heatmap_width, res = 72);
 	pheatmap(data.matrix(filtered_norm_rna), '.$heatmap_clustercols.', '.$heatmap_key.', scale = "row", border_color = NA, cellwidth = 30, cellheight = 30, treeheight_row = 75, treeheight_col = 75, annotation_legend = FALSE, fontsize = 12, fontfamily = "mono", fontface = "plain", color = '.$heatmap_colors.');
-	dev.off();');
+	dev.off();
+}'."\n";
+
+	close (RSCRIPT);
 
 	return 1;
 }

@@ -29,19 +29,22 @@ my $queue_file = "../result/queue.txt";
 my $log_path = "../result/";
 # Example:
 #~ my $Rpackages_dir = "/user_home_path/R/architecture/R_version";
-my $Rpackages_dir = "/home/cbrumbau/R/i686-pc-linux-gnu-library/2.11";
+#~ my $Rpackages_dir = "/home/cbrumbau/R/i686-pc-linux-gnu-library/2.11";
+my $Rpackages_dir = "/home/cbrumbau/R/i686-pc-linux-gnu-library/2.14";
 
 my $job_id = "";
 my $email = "";
 my $files = "";
 my $flags = "";
+my $ANOVA_features = 0;
 my $adjpvalue = "";
 my $adjpvalue_type = "";
-my $args = GetOptions ("jobid=s"		=> \$job_id,
-						"email=s"		=> \$email,
-						"files=s"		=> \$files,
-						"currentjob=s"	=> \$flags,
-						"adjpvalue=s"	=> \$adjpvalue,
+my $args = GetOptions ("jobid=s"			=> \$job_id,
+						"email=s"			=> \$email,
+						"files=s"			=> \$files,
+						"currentjob=s"		=> \$flags,
+						"anovafeatures=i"	=> \$ANOVA_features,
+						"adjpvalue=s"		=> \$adjpvalue,
 						"adjpvaluetype=s"	=> \$adjpvalue_type);
 
 # format_localtime ()
@@ -110,8 +113,8 @@ sub printResultsPage {
 	</div>
 
 	<div class="navigation">
-		<a href="/contact.html">Contact Us</a>
 		<a href="/about.html">About</a>
+		<a href="/license.html">License</a>
 		<a href="/faq.html">FAQ</a>
 		<a href="/">Upload Data</a>
 		<div class="clearer"><span></span></div>
@@ -143,19 +146,24 @@ ENDHTML1
 			$heatmap = 1;
 		}
 	}
-	my $img_url = $base_url."/result/".$job_id."/05b_-_heatmap.png";
+	my $img_url = "";
+	if (($test eq "ttest") || ($test eq "ANOVA")) {
+		$img_url = $base_url."/result/".$job_id."/05b_-_heatmap.png";
+	} elsif (($test eq "DESeq") || ($test eq "ANOVAnegbin")) {
+		$img_url = $base_url."/result/".$job_id."/03b_-_heatmap.png";
+	}
 	if ($heatmap) {
 		print WRITEFILE ("$t2<h2>Heatmap:</h2>\n(Click to enlarge)<br/>\n");
 		print WRITEFILE ("$t2<a href=\"".$img_url."\" rel=\"lightbox\"><img src=\"".$img_url."\" height=\"300\" width =\"300\"/></a>\n<br/>\n");
 	} else {
-		print WRITEFILE ("$t2<h2>Heatmap:</h2>\n$t2<p>Problems were encountered and the heatmap could not be generated. Please refer to any warnings and check your choice of options and your data.</p>\n$t2<br/>\n");
+		print WRITEFILE ("$t2<h2>Heatmap:</h2>\n$t2<p>Problems were encountered and the heatmap could not be generated. This could be due to the fact that no statistically significant probes were found. Please refer to any warnings and check your choice of options and your data.</p>\n$t2<br/>\n");
 	}
 	# Display table
 	if ($make_table) {
 		if (scalar(@{$table{"Gene"}}) > 0) {
 			if (($test eq "ttest") || ($test eq "DESeq")) {
 				print WRITEFILE ("$t2<h2>p-values and Fold Change:</h2><br/>\n");
-			} elsif ($test eq "ANOVA") {
+			} elsif (($test eq "ANOVA") || ($test eq "ANOVAnegbin")) {
 				print WRITEFILE ("$t2<h2>p-values:</h2><br/>\n");
 			}
 			print WRITEFILE ("$t2<table class=\"results-table\">\n");
@@ -183,6 +191,9 @@ ENDHTML1
 				} elsif ($key eq "Case Mean") {
 					my $case_base_mean_format = sprintf("%0.5f", $table{"Case Mean"}[$i]);
 					print WRITEFILE "<td class=\"results-td\">".$case_base_mean_format."</td>";
+				} elsif ($key =~ m/Base Mean \d+/) {
+					my $base_mean_format = sprintf("%0.5f", $table{$key}[$i]);
+					print WRITEFILE "<td class=\"results-td\">".$base_mean_format."</td>";
 				} elsif ($key eq "Fold Change") {
 					my $fold_change_negative = 0;
 					if ($table{"Fold Change"}[$i] =~ m/^-/) {
@@ -215,7 +226,7 @@ ENDHTML1
 
 	<div class="holder">
 
-		<div class="footer">&copy; 2011 <a href="mailto:nanostring\@achilles.soe.ucsc.edu">Chris Brumbaugh</a>. Valid <a href="http://jigsaw.w3.org/css-validator/check/referer">CSS</a> &amp; <a href="http://validator.w3.org/check?uri=referer">XHTML</a>. Template design by <a href="http://arcsin.se">Arcsin</a>
+		<div class="footer">&copy; 2011 <a href="mailto:admin\@nanostride.soe.ucsc.edu">Chris Brumbaugh</a>. Valid <a href="http://jigsaw.w3.org/css-validator/check/referer">CSS</a> &amp; <a href="http://validator.w3.org/check?uri=referer">XHTML</a>. Template design by <a href="http://arcsin.se">Arcsin</a>
 		</div>
 
 	</div>
@@ -238,8 +249,7 @@ $flags =~ s/\\"/"/g;
 my $script_cmd = "./heatmap_nanostring.pl ".$flags." --Rpackdir='".$Rpackages_dir."'";
 my @args = ($script_cmd);
 print STDERR format_localtime()."DEBUG: Starting script to normalize data and generate heatmap...\n";
-system (@args) == 0;
-	#~ or die "system @args failed: $?";
+system (@args);
 # Wait for script to finish
 my $pid = Unix::PID->new ();
 $pid->wait_for_pidsof (
@@ -256,7 +266,20 @@ $pid->wait_for_pidsof (
 unlink ($log_path.$job_id.'_execute.pid');
 print STDERR format_localtime()."DEBUG: Script finished.\n";
 # Rename files for chronological order
-my @output_files = glob ($workdir."*.csv");
+my $test = "";
+my @output_files = glob ($workdir."*");
+foreach my $file (@output_files) {
+	if ($file =~ m/sorted_ttest/) {
+		$test = "ttest";
+	} elsif ($file =~ m/DESeq_normalized/) {
+		$test = "DESeq";
+	} elsif ($file =~ m/sorted_ANOVA/) {
+		$test = "ANOVA";
+	} elsif ($file =~ m/DESeq_ANODEV_normalized/) {
+		$test = "ANOVAnegbin";
+	}
+}
+@output_files = glob ($workdir."*.csv");
 push (@output_files, glob ($workdir."*.tab"));
 push (@output_files, glob ($workdir."*.txt"));
 push (@output_files, glob ($workdir."*.png"));
@@ -265,13 +288,22 @@ foreach my $file (@output_files) {
 	$new_file =~ s/options\.txt/00a_-_options.txt/i;
 	$new_file =~ s/warnings\.txt/00b_-_warnings.txt/i;
 	$new_file =~ s/corrected_data\.(csv)|corrected_data\.(tab)/00c_-_corrected_data.$1/i;
-	$new_file =~ s/positive_normalized\.(csv)|positive_normalized\.(tab)/01_-_positive_normalized.$1/i;
-	$new_file =~ s/negative_normalized\.(csv)|negative_normalized\.(tab)/02_-_negative_normalized.$1/i;
+	$new_file =~ s/raw_data\.(csv)|raw_data\.(tab)/00c_-_raw_data.$1/i;
+	$new_file =~ s/housekeeping\.(csv)|housekeeping\.(tab)/00d_-_housekeeping.$1/i;
+	$new_file =~ s/positive_normalized\.(csv)|positive_normalized\.(tab)/01_-_positive_corrected.$1/i;
+	$new_file =~ s/negative_normalized\.(csv)|negative_normalized\.(tab)/02_-_negative_corrected.$1/i;
 	$new_file =~ s/sample_content_normalized\.(csv)|sample_content_normalized\.(tab)/03_-_sample_content_normalized.$1/i;
-	$new_file =~ s/DESeq_normalized\.(csv)|DESeq_normalized\.(tab)/03_-_DESeq_normalized.$1/i;
-	$new_file =~ s/sorted_(\w+)\.(csv)|sorted_(\w+)\.(tab)/04_-_sorted_$1.$2/i;
-	$new_file =~ s/heatmap\.(csv)|heatmap\.(tab)/05a_-_heatmap.$1/i;
-	$new_file =~ s/heatmap\.png/05b_-_heatmap.png/i;
+	$new_file =~ s/DESeq_normalized\.(csv)|DESeq_normalized\.(tab)/01_-_DESeq_normalized.$1/i;
+	$new_file =~ s/DESeq_ANODEV_normalized\.(csv)|DESeq_ANODEV_normalized\.(tab)/01_-_DESeq_ANODEV_normalized.$1/i;
+	if (($test eq "ttest") || ($test eq "ANOVA")) {
+		$new_file =~ s/sorted_(\w+)\.(csv)|sorted_(\w+)\.(tab)/04_-_sorted_$1.$2/i;
+		$new_file =~ s/heatmap\.(csv)|heatmap\.(tab)/05a_-_heatmap.$1/i;
+		$new_file =~ s/heatmap\.png/05b_-_heatmap.png/i;
+	} elsif (($test eq "DESeq") || ($test eq "ANOVAnegbin")) {
+		$new_file =~ s/sorted_(\w+)\.(csv)|sorted_(\w+)\.(tab)/02_-_sorted_$1.$2/i;
+		$new_file =~ s/heatmap\.(csv)|heatmap\.(tab)/03a_-_heatmap.$1/i;
+		$new_file =~ s/heatmap\.png/03b_-_heatmap.png/i;
+	}
 	rename ($file, $new_file);
 }
 # Process finished files, call send e-mail function, ADD send link to generated results page
@@ -310,20 +342,18 @@ close (READFILE);
 print STDERR format_localtime()."DEBUG: Number of warnings is ".scalar(@warnings).".\n";
 # Generate table
 print STDERR format_localtime()."DEBUG: Starting table of gene/p-value/fold change...\n";
-my $test = "";
 my $sorted_file = "";
 my $heatmap_file = "";
 my $has_heatmap = 0;
 @output_files = glob ($workdir."*");
 foreach my $file (@output_files) {
 	if ($file =~ m/sorted_ttest/) {
-		$test = "ttest";
 		$sorted_file = $file;
 	} elsif ($file =~ m/sorted_DESeq/) {
-		$test = "DESeq";
 		$sorted_file = $file;
 	} elsif ($file =~ m/sorted_ANOVA/) {
-		$test = "ANOVA";
+		$sorted_file = $file;
+	} elsif ($file =~ m/sorted_DESeq_ANODEV/) {
 		$sorted_file = $file;
 	} elsif ($file =~ m/heatmap/) {
 		if ($file !~ m/heatmap\.png/) {
@@ -367,10 +397,14 @@ if (($test eq "ttest") || ($test eq "DESeq")) {
 	$table{"Case Mean"} = ();
 	$table{"Fold Change"} = ();
 	@keys = ("Gene", $pvalue_header, "Control Mean", "Case Mean", "Fold Change");
-} elsif ($test eq "ANOVA") {
+} elsif (($test eq "ANOVA") || ($test eq "ANOVAnegbin")) {
 	$table{"Gene"} = ();
 	$table{$pvalue_header} = ();
 	@keys = ("Gene", $pvalue_header);
+	for (my $i = 1; $i <= $ANOVA_features; $i++) {
+		$table{"Base Mean $i"} = ();
+		push(@keys, "Base Mean $i");
+	}
 }
 if (($heatmap_file ne "") and ($has_heatmap)) {
 	# Open heatmap file, get filtered genes
@@ -413,7 +447,7 @@ if (($heatmap_file ne "") and ($has_heatmap)) {
 		# Strip "
 		my $filtered_header = $header[$i];
 		$filtered_header =~ s/^"|"$//g;
-		$header_to_index{$filtered_header} = $i;
+		$header_to_index{"$filtered_header"} = $i;
 	}
 	print STDERR format_localtime()."DEBUG: Header to index hash is (";
 	my $hash_size = keys (%header_to_index);
@@ -434,7 +468,7 @@ if (($heatmap_file ne "") and ($has_heatmap)) {
 		foreach my $i (0..$#line_array) {
 			$line_array[$i] =~ s/^"|"$//g;
 		}
-		my $id = $line_array[$header_to_index{id}];
+		my $id = $line_array[$header_to_index{"id"}];
 		if (grep {$_ eq $id} @filtered_gene) {
 			if ($test eq "ttest") {
 				push (@{$table{"Gene"}}, $line_array[$header_to_index{"id"}]);
@@ -458,6 +492,19 @@ if (($heatmap_file ne "") and ($has_heatmap)) {
 				push (@{$table{"Fold Change"}}, $line_array[$header_to_index{"foldChange"}]);
 			} elsif ($test eq "ANOVA") {
 				push (@{$table{"Gene"}}, $line_array[$header_to_index{"id"}]);
+				for (my $i = 1; $i <= $ANOVA_features; $i++) {
+					push (@{$table{"Base Mean $i"}}, $line_array[$header_to_index{"baseMean$i"}]);
+				}
+				if ($adjpvalue eq "false") {
+					push (@{$table{$pvalue_header}}, $line_array[$header_to_index{"p.value"}]);
+				} elsif ($adjpvalue eq "true") {
+					push (@{$table{$pvalue_header}}, $line_array[$header_to_index{"p.value.adj"}]);
+				}
+			} elsif ($test eq "ANOVAnegbin") {
+				push (@{$table{"Gene"}}, $line_array[$header_to_index{"id"}]);
+				for (my $i = 1; $i <= $ANOVA_features; $i++) {
+					push (@{$table{"Base Mean $i"}}, $line_array[$header_to_index{"baseMean$i"}]);
+				}
 				if ($adjpvalue eq "false") {
 					push (@{$table{$pvalue_header}}, $line_array[$header_to_index{"p.value"}]);
 				} elsif ($adjpvalue eq "true") {
@@ -486,9 +533,9 @@ print STDERR format_localtime()."DEBUG: Results page generated.\n";
 my $results_page = $base_url.'/result/'.$job_id.'/';
 print STDERR format_localtime()."DEBUG: Preparing notifcation e-mail...\n";
 my $msg = MIME::Lite->new (
-	From		=> 'noreply@achilles.ucsc.edu',
+	From		=> 'noreply@nanostride.soe.ucsc.edu',
 	To			=> $email,
-	Subject		=> 'NanoString Results from '.$job_id,
+	Subject		=> 'NanoStriDE Results from '.$job_id,
 	Type		=> 'multipart/mixed',
 );
 $msg->attach (
